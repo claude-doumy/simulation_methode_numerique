@@ -1,0 +1,1493 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Simulateur — Intégration et Dérivation Numériques</title>
+  <style>
+    /* -------------------------------------------------------------
+       Variables de thème, typographie et palette scientifique (WCAG AA)
+       ------------------------------------------------------------- */
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7fb;
+      --cd: #ffffff;
+      --fg: #141c2b;
+      --mu: #475569;
+      --bd: #cbd5e1;
+      --ac: #1d4ed8;       /* Contraste élevé > 4.5:1 */
+      --ac-focus: #1e40af;
+      --c2: #c2410c;       /* Orange terreux */
+      --c3: #0f766e;       /* Cyan/Teal sombre */
+      --c4: #be123c;       /* Rose/Bordeaux */
+      --c5: #6d28d9;       /* Violet académique */
+      --tn: #e2e8f0;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0b0f17;
+        --cd: #131b26;
+        --fg: #f1f5f9;
+        --mu: #94a3b8;
+        --bd: #223044;
+        --ac: #60a5fa;
+        --ac-focus: #93c5fd;
+        --c2: #fb923c;
+        --c3: #2dd4bf;
+        --c4: #fb7185;
+        --c5: #c084fc;
+        --tn: #1e293b;
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+        --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.5);
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --bg: #0b0f17;
+      --cd: #131b26;
+      --fg: #f1f5f9;
+      --mu: #94a3b8;
+      --bd: #223044;
+      --ac: #60a5fa;
+      --ac-focus: #93c5fd;
+      --c2: #fb923c;
+      --c3: #2dd4bf;
+      --c4: #fb7185;
+      --c5: #c084fc;
+      --tn: #1e293b;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+      --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    :root[data-theme="light"] {
+      --bg: #f5f7fb;
+      --cd: #ffffff;
+      --fg: #141c2b;
+      --mu: #475569;
+      --bd: #cbd5e1;
+      --ac: #1d4ed8;
+      --ac-focus: #1e40af;
+      --c2: #c2410c;
+      --c3: #0f766e;
+      --c4: #be123c;
+      --c5: #6d28d9;
+      --tn: #e2e8f0;
+    }
+
+    *, *::before, *::after {
+      box-sizing: inherit;
+    }
+
+    html {
+      scroll-padding-top: env(safe-area-inset-top, 0px);
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.25s ease, color 0.25s ease;
+    }
+
+    /* -------------------------------------------------------------
+       Header & Layout
+       ------------------------------------------------------------- */
+    header {
+      border-bottom: 1px solid var(--bd);
+      background: var(--cd);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .header-text h1 {
+      font-size: clamp(20px, 3.2vw, 26px);
+      margin: 0;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--fg);
+    }
+
+    .header-text .sub {
+      color: var(--mu);
+      margin: 4px 0 0;
+      font-size: 13.5px;
+    }
+
+    .theme-toggle-btn {
+      background: var(--bg);
+      border: 1px solid var(--bd);
+      color: var(--fg);
+      padding: 8px 14px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 42px;
+      min-width: 42px;
+      transition: all 0.2s;
+    }
+
+    .theme-toggle-btn:hover {
+      border-color: var(--ac);
+      color: var(--ac);
+    }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px 16px 48px;
+    }
+
+    /* -------------------------------------------------------------
+       Tabs Navigation (Accessibilité clavier & ARIA)
+       ------------------------------------------------------------- */
+    .tabs-wrapper {
+      margin-bottom: 16px;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 6px;
+      background: transparent;
+    }
+
+    .tabs button {
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 9px 15px;
+      min-height: 44px; /* WCAG Touch target */
+      border-radius: var(--radius-md);
+      border: 1px solid var(--bd);
+      background: var(--cd);
+      color: var(--fg);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .tabs button:hover {
+      border-color: var(--ac);
+      color: var(--ac);
+    }
+
+    .tabs button[aria-selected="true"] {
+      background: var(--ac);
+      border-color: var(--ac);
+      color: #ffffff;
+      box-shadow: 0 2px 8px rgba(29, 78, 216, 0.3);
+    }
+
+    /* Focus visible accessible */
+    button:focus-visible,
+    select:focus-visible,
+    input:focus-visible {
+      outline: 3px solid var(--c4);
+      outline-offset: 2px;
+    }
+
+    /* -------------------------------------------------------------
+       Panneau principal & Contrôles
+       ------------------------------------------------------------- */
+    .panel {
+      display: grid;
+      grid-template-columns: 310px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .ctl, .ch, .out > div, .tw {
+      background: var(--cd);
+      border: 1px solid var(--bd);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .ctl {
+      padding: 18px 16px;
+      position: sticky;
+      top: 16px;
+    }
+
+    .ctl-title {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--mu);
+      font-weight: 700;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .ctl label {
+      display: block;
+      font-size: 13.5px;
+      color: var(--mu);
+      margin: 0 0 14px;
+      font-weight: 500;
+    }
+
+    .ctl output {
+      color: var(--fg);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ctl select,
+    .ctl input[type="range"],
+    .ctl input[type="text"] {
+      width: 100%;
+      margin-top: 6px;
+      box-sizing: border-box;
+    }
+
+    .ctl select,
+    .ctl input[type="text"] {
+      font: inherit;
+      font-size: 13.5px;
+      padding: 8px 10px;
+      min-height: 40px;
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--bd);
+      border-radius: var(--radius-sm);
+      transition: border-color 0.2s;
+    }
+
+    .ctl input[type="range"] {
+      accent-color: var(--ac);
+      height: 24px;
+      cursor: pointer;
+    }
+
+    .ctl button.action-btn {
+      font: inherit;
+      width: 100%;
+      padding: 10px 14px;
+      min-height: 44px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--ac);
+      background: var(--bg);
+      color: var(--ac);
+      cursor: pointer;
+      font-weight: 600;
+      margin-top: 6px;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .ctl button.action-btn:hover {
+      background: var(--ac);
+      color: #ffffff;
+    }
+
+    .ctl p.note {
+      font-size: 12.5px;
+      color: var(--mu);
+      margin: 14px 0 0;
+      padding-top: 12px;
+      border-top: 1px dashed var(--bd);
+      line-height: 1.5;
+    }
+
+    /* -------------------------------------------------------------
+       Cartes de résultats (KPIs)
+       ------------------------------------------------------------- */
+    .out {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .out > div {
+      padding: 12px 14px;
+      background: var(--cd);
+      border: 1px solid var(--bd);
+      border-radius: var(--radius-md);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+
+    .out > div:hover {
+      border-color: var(--ac);
+    }
+
+    .out small {
+      display: block;
+      color: var(--mu);
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .out b {
+      font-size: 18px;
+      font-variant-numeric: tabular-nums;
+      color: var(--fg);
+      word-break: break-all;
+    }
+
+    .out span {
+      display: block;
+      color: var(--mu);
+      font-size: 11.5px;
+      margin-top: 4px;
+    }
+
+    .out .bad b {
+      color: var(--c4);
+    }
+
+    /* -------------------------------------------------------------
+       Graphiques SVG & Légendes
+       ------------------------------------------------------------- */
+    .ch {
+      padding: 16px 18px;
+      margin-bottom: 16px;
+      background: var(--cd);
+      border-radius: var(--radius-lg);
+    }
+
+    .ch:empty {
+      display: none;
+    }
+
+    svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      overflow: visible;
+    }
+
+    svg text {
+      fill: var(--mu);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11px;
+    }
+
+    .gr {
+      stroke: var(--bd);
+      stroke-opacity: 0.8;
+      stroke-width: 1;
+      fill: none;
+    }
+
+    .ln {
+      fill: none;
+      stroke-width: 2.3;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+
+    .lg {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      font-size: 12.5px;
+      color: var(--mu);
+      margin: 10px 0 0;
+      padding-top: 10px;
+      border-top: 1px solid var(--bd);
+    }
+
+    .lg span {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .lg i {
+      display: inline-block;
+      width: 14px;
+      height: 4px;
+      margin-right: 6px;
+      vertical-align: middle;
+      border-radius: 2px;
+    }
+
+    /* -------------------------------------------------------------
+       Tableaux (Romberg & Coût égal)
+       ------------------------------------------------------------- */
+    .tw {
+      overflow-x: auto;
+      padding: 12px;
+      margin-top: 10px;
+    }
+
+    table {
+      border-collapse: collapse;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      width: 100%;
+    }
+
+    td, th {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--bd);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    th {
+      background: var(--tn);
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    td.hl {
+      background: var(--tn);
+      font-weight: 700;
+      color: var(--ac);
+    }
+
+    .al {
+      text-align: left;
+    }
+
+    /* -------------------------------------------------------------
+       Mode Responsive (<820px)
+       ------------------------------------------------------------- */
+    @media (max-width: 820px) {
+      .panel {
+        grid-template-columns: 1fr;
+      }
+      .ctl {
+        position: static;
+      }
+      .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .theme-toggle-btn {
+        align-self: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- En-tête avec titre, descriptif et sélecteur de thème -->
+  <header>
+    <div class="header-content">
+      <div class="header-text">
+        <h1>Simulateur de méthodes numériques</h1>
+        <p class="sub">Intégration avancée et dérivation numérique : code pur en JavaScript, mesures rigoureuses et analyse log-log.</p>
+      </div>
+      <button id="theme-toggle" class="theme-toggle-btn" aria-label="Basculer le thème clair ou sombre">
+        <span id="theme-icon" aria-hidden="true">🌙</span>
+        <span id="theme-text">Mode sombre</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Barre d'onglets accessible au clavier -->
+    <div class="tabs-wrapper">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Onglets de simulation numérique"></div>
+    </div>
+
+    <!-- Conteneur principal : contrôles à gauche, sorties et graphiques à droite -->
+    <div class="panel">
+      <aside class="ctl" id="ctl" aria-label="Paramètres de simulation"></aside>
+      <section aria-label="Visualisations et métriques" id="simulation-panel" tabindex="-1">
+        <div id="out" class="out" aria-live="polite" aria-atomic="true"></div>
+        <div id="c0" class="ch" role="region" aria-label="Graphique principal"></div>
+        <div id="c1" class="ch" role="region" aria-label="Graphique ou tableau secondaire"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    /* =============================================================
+       Constantes globales, formatage et utilitaires
+       ============================================================= */
+    const $ = s => document.querySelector(s);
+    const PI = Math.PI;
+    const EM = 2.220446049250313e-16; // Epsilon machine standard IEEE 754
+    const v = id => {
+      const el = $('#' + id);
+      return el ? el.value : '';
+    };
+
+    // Palette harmonisée avec variables CSS
+    const C = [
+      'var(--ac)',  // Bleu
+      'var(--c2)',  // Orange
+      'var(--c3)',  // Vert/Teal
+      'var(--c4)',  // Rose/Bordeaux
+      'var(--c5)',  // Violet
+      'var(--mu)'   // Gris atténué
+    ];
+
+    /**
+     * Formate un nombre avec virgule décimale française.
+     */
+    const nf = (x, d = 3) => isFinite(x) ? Number(x).toFixed(d).replace('.', ',') : '—';
+    const sci = x => isFinite(x) ? Number(x).toExponential(1).replace('.', ',') : '—';
+    const big = n => !isFinite(n) ? '—' : (n < 1e7 ? Math.round(n).toLocaleString('fr-FR') : sci(n));
+
+    /**
+     * Génère une carte de métrique clé/valeur accessible.
+     */
+    const kv = (l, x, s = '', b = 0) =>
+      `<div class="${b ? 'bad' : ''}"><small>${l}</small><b>${x}</b><span>${s}</span></div>`;
+
+    /* =============================================================
+       Méthodes numériques (implémentations manuelles pures)
+       ============================================================= */
+    // Méthode composite des trapèzes
+    const trap = (f, a, b, n) => {
+      const h = (b - a) / n;
+      let s = (f(a) + f(b)) / 2;
+      for (let i = 1; i < n; i++) s += f(a + i * h);
+      return s * h;
+    };
+
+    // Méthode composite de Simpson (1/3)
+    const simp = (f, a, b, n) => {
+      const h = (b - a) / n;
+      let s = f(a) + f(b);
+      for (let i = 1; i < n; i++) s += (i % 2 ? 4 : 2) * f(a + i * h);
+      return s * h / 3;
+    };
+
+    // Algorithme de Romberg (accélération de Richardson)
+    function romb(f, a, b, K) {
+      const R = [];
+      let n = 1;
+      for (let k = 0; k <= K; k++) {
+        R[k] = [];
+        if (!k) {
+          R[0][0] = (b - a) / 2 * (f(a) + f(b));
+        } else {
+          const h = (b - a) / n;
+          let s = 0;
+          for (let i = 0; i < n; i++) s += f(a + (i + 0.5) * h);
+          R[k][0] = R[k - 1][0] / 2 + (h / 2) * s;
+          n *= 2;
+        }
+        for (let j = 1; j <= k; j++) {
+          R[k][j] = R[k][j - 1] + (R[k][j - 1] - R[k - 1][j - 1]) / (4 ** j - 1);
+        }
+      }
+      return R;
+    }
+
+    // Quadrature de Gauss-Legendre (nœuds et poids calculés par Newton)
+    const GL = {};
+    function gl(n) {
+      if (GL[n]) return GL[n];
+      const x = [], w = [];
+      for (let i = 0; i < n; i++) {
+        let z = Math.cos(PI * (i + 0.75) / (n + 0.5));
+        let pp;
+        for (let t = 0; t < 100; t++) {
+          let p1 = 1, p2 = 0;
+          for (let j = 1; j <= n; j++) {
+            const p3 = p2;
+            p2 = p1;
+            p1 = ((2 * j - 1) * z * p2 - (j - 1) * p3) / j;
+          }
+          pp = n * (z * p1 - p2) / (z * z - 1);
+          const dz = p1 / pp;
+          z -= dz;
+          if (Math.abs(dz) < 1e-15) break;
+        }
+        x.push(z);
+        w.push(2 / ((1 - z * z) * pp * pp));
+      }
+      return GL[n] = [x, w];
+    }
+
+    const glq = (f, a, b, n) => {
+      const [x, w] = gl(n);
+      const h = (b - a) / 2;
+      const m = (a + b) / 2;
+      let s = 0;
+      for (let i = 0; i < n; i++) s += w[i] * f(m + h * x[i]);
+      return s * h;
+    };
+
+    // Méthode de Simpson adaptative récursive
+    function asimp(f, a, b, e) {
+      const pts = [];
+      const F = x => { pts.push(x); return f(x); };
+      const S = (a, fa, b, fb, fm) => (b - a) / 6 * (fa + 4 * fm + fb);
+
+      const rec = (a, fa, b, fb, m, fm, w, e, d) => {
+        const l = (a + m) / 2;
+        const r = (m + b) / 2;
+        const fl = F(l);
+        const fr = F(r);
+        const Sg = S(a, fa, m, fm, fl);
+        const Sd = S(m, fm, b, fb, fr);
+        const dl = Sg + Sd - w;
+        if (d > 40 || Math.abs(dl) <= 15 * e) return Sg + Sd + dl / 15;
+        return rec(a, fa, m, fm, l, fl, Sg, e / 2, d + 1) +
+               rec(m, fm, b, fb, r, fr, Sd, e / 2, d + 1);
+      };
+
+      const fa = F(a), fb = F(b), m = (a + b) / 2, fm = F(m);
+      const I = rec(a, fa, b, fb, m, fm, S(a, fa, b, fb, fm), e, 0);
+      return { I, ev: pts.length, pts };
+    }
+
+    // Générateur pseudo-aléatoire reproductible (Mulberry32)
+    function rng(a) {
+      return () => {
+        a |= 0;
+        a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // Régression linéaire log-log pour l'estimation d'ordre de convergence
+    function fit(p, lo = 0, hi = 1e99, fl = 1e-13) {
+      const q = p.filter(a => a[0] >= lo && a[0] <= hi && a[1] > fl);
+      if (q.length < 2) return null;
+      const u = q.map(a => Math.log10(a[0]));
+      const w = q.map(a => Math.log10(a[1]));
+      const n = u.length;
+      const su = u.reduce((a, b) => a + b);
+      const sw = w.reduce((a, b) => a + b);
+      const suu = u.reduce((a, b) => a + b * b, 0);
+      const suw = u.reduce((a, b, i) => a + b * w[i], 0);
+      const m = (n * suw - su * sw) / (n * suu - su * su);
+      const b = (sw - m * su) / n;
+      const x0 = Math.min(...q.map(a => a[0]));
+      const x1 = Math.max(...q.map(a => a[0]));
+      return {
+        m,
+        b,
+        line: {
+          p: [[x0, 10 ** (b + m * Math.log10(x0))], [x1, 10 ** (b + m * Math.log10(x1))]],
+          c: C[5],
+          d: 1
+        }
+      };
+    }
+
+    // Calcul / extrapolation du coût d'évaluation
+    function cost(tol, p) {
+      p = p.map(a => [a[0], Math.max(a[1], 1e-17)]);
+      const i = p.findIndex(a => a[1] <= tol);
+      if (i === 0) return [p[0][0], 0];
+      if (i > 0) {
+        const [a, b] = [p[i - 1], p[i]];
+        const t = (Math.log10(tol) - Math.log10(a[1])) / (Math.log10(b[1]) - Math.log10(a[1]));
+        return [10 ** (Math.log10(a[0]) + t * (Math.log10(b[0]) - Math.log10(a[0]))), 0];
+      }
+      const f = fit(p);
+      return f ? [10 ** ((Math.log10(tol) - f.b) / f.m), 1] : [NaN, 1];
+    }
+
+    const q17 = p => p.map(a => [a[0], Math.max(a[1], 1e-17)]);
+
+    /* =============================================================
+       Fonctions de test (conservées + fonctions élémentaires + personnalisation)
+       ============================================================= */
+    // Fonctions d'intégration
+    const FI = {
+      ell: {
+        n: 'Périmètre de l’ellipse (analytique, périodique)',
+        f: t => 8 * Math.sqrt(1 - 0.75 * Math.sin(t) ** 2),
+        a: 0,
+        b: PI / 2
+      },
+      exp4: {
+        n: 'e^(4x) sur [0,1] (non périodique)',
+        f: x => Math.exp(4 * x),
+        a: 0,
+        b: 1,
+        r: (Math.exp(4) - 1) / 4
+      },
+      sqrt: {
+        n: '√x sur [0,1] (singulière en 0)',
+        f: Math.sqrt,
+        a: 0,
+        b: 1,
+        r: 2 / 3
+      },
+      pic: {
+        n: 'Pic en 0,3 : 1/(1+10⁴(x−0,3)²)',
+        f: x => 1 / (1 + 1e4 * (x - 0.3) ** 2),
+        a: 0,
+        b: 1,
+        r: (Math.atan(70) + Math.atan(30)) / 100
+      },
+      // Fonctions élémentaires ajoutées
+      poly: {
+        n: 'Polynôme : x⁴ − 3x² + 2 sur [0,2]',
+        f: x => x ** 4 - 3 * x ** 2 + 2,
+        a: 0,
+        b: 2,
+        r: (32 / 5) - (3 * 8 / 3) + 4 // 6.4 - 8 + 4 = 2.4
+      },
+      cos: {
+        n: 'cos(x) sur [0, π]',
+        f: Math.cos,
+        a: 0,
+        b: PI,
+        r: 0
+      },
+      lorentz: {
+        n: 'Lorentzienne : 1/(1 + x²) sur [0,1]',
+        f: x => 1 / (1 + x * x),
+        a: 0,
+        b: 1,
+        r: PI / 4
+      },
+      log1p: {
+        n: 'ln(1 + x) sur [0,1]',
+        f: x => Math.log(1 + x),
+        a: 0,
+        b: 1,
+        r: 2 * Math.log(2) - 1
+      }
+    };
+    FI.ell.r = glq(FI.ell.f, 0, PI / 2, 60);
+
+    // Fonctions de dérivation
+    const FD = {
+      exp: {
+        n: 'eˣ',
+        f: Math.exp,
+        d: Math.exp,
+        d2: Math.exp,
+        d3: Math.exp
+      },
+      sin: {
+        n: 'sin x',
+        f: Math.sin,
+        d: Math.cos,
+        d2: x => -Math.sin(x),
+        d3: x => -Math.cos(x)
+      },
+      atan: {
+        n: 'arctan x',
+        f: Math.atan,
+        d: x => 1 / (1 + x * x),
+        d2: x => -2 * x / (1 + x * x) ** 2,
+        d3: x => (6 * x * x - 2) / (1 + x * x) ** 3
+      },
+      // Fonctions élémentaires ajoutées pour la dérivation
+      cos: {
+        n: 'cos x',
+        f: Math.cos,
+        d: x => -Math.sin(x),
+        d2: x => -Math.cos(x),
+        d3: Math.sin
+      },
+      cube: {
+        n: 'x³ − 2x',
+        f: x => x ** 3 - 2 * x,
+        d: x => 3 * x * x - 2,
+        d2: x => 6 * x,
+        d3: () => 6
+      },
+      log: {
+        n: 'ln(x) pour x > 0',
+        f: Math.log,
+        d: x => 1 / x,
+        d2: x => -1 / (x * x),
+        d3: x => 2 / (x ** 3)
+      }
+    };
+
+    // Monte-Carlo multidimensionnel
+    const C1 = 0.7468241328124270;
+    const Vb = d => {
+      let a = 1, b = 2;
+      for (let k = 2; k <= d; k++) [a, b] = [b, 2 * PI / k * a];
+      return d ? b : 1;
+    };
+
+    function mcRun(kd, d, N, seed) {
+      const r = rng(seed);
+      let s = 0, s2 = 0;
+      for (let i = 0; i < N; i++) {
+        let q = 0;
+        for (let k = 0; k < d; k++) {
+          const u = r(), t = kd ? 2 * u - 1 : u;
+          q += t * t;
+        }
+        const y = kd ? (q <= 1 ? 1 : 0) : Math.exp(-q);
+        s += y;
+        s2 += y * y;
+      }
+      const vol = kd ? 2 ** d : 1;
+      const m = s / N;
+      const sd = Math.sqrt(Math.max(0, (s2 - N * m * m) / (N - 1)));
+      return { v: vol * m, se: vol * sd / Math.sqrt(N) };
+    }
+
+    function grid(kd, d, m) {
+      const n = m ** d;
+      let s = 0;
+      for (let i = 0; i < n; i++) {
+        let u = i, q = 0;
+        for (let k = 0; k < d; k++) {
+          const t = ((u % m) + 0.5) / m;
+          u = Math.floor(u / m);
+          const z = kd ? 2 * t - 1 : t;
+          q += z * z;
+        }
+        s += kd ? (q <= 1 ? 1 : 0) : Math.exp(-q);
+      }
+      return (kd ? 2 ** d : 1) * s / n;
+    }
+
+    /* =============================================================
+       Tracé SVG haute précision (Axes log-log ou linéaires, légendes)
+       ============================================================= */
+    function draw(id, S, o) {
+      const W = 640;
+      const H = o.h || 300;
+      const L = 60, R = 16, T = 16, B = 46;
+      const A = (k, x) => o[k + 'l'] ? Math.log10(x) : x;
+      const ok = q => (!o.xl || q[0] > 0) && (!o.yl || q[1] > 0) && isFinite(q[1]);
+
+      let X = [], Y = [];
+      S.forEach(s => (s.p || []).forEach(q => {
+        if (ok(q)) {
+          X.push(A('x', q[0]));
+          Y.push(A('y', q[1]));
+        }
+      }));
+
+      if (!X.length || !Y.length) {
+        $('#' + id).innerHTML = '<p class="lg" style="padding: 10px;">Données insuffisantes pour le graphique.</p>';
+        return;
+      }
+
+      let x0 = Math.min(...X), x1 = Math.max(...X);
+      let y0 = Math.min(...Y), y1 = Math.max(...Y);
+
+      if (o.xl) { x0 = Math.floor(x0); x1 = Math.ceil(x1); }
+      if (o.yl) { y0 = Math.floor(y0); y1 = Math.ceil(y1); }
+      if (x1 <= x0) x1 = x0 + 1;
+      if (y1 <= y0) y1 = y0 + 1;
+
+      const px = x => L + (A('x', x) - x0) / (x1 - x0) * (W - L - R);
+      const py = x => H - B - (A('y', x) - y0) / (y1 - y0) * (H - T - B);
+
+      const tk = (a, b, l) => {
+        const r = [];
+        if (l) {
+          const s = Math.ceil((b - a) / 7);
+          for (let k = a; k <= b; k += s) r.push(k);
+        } else {
+          for (let i = 0; i <= 5; i++) r.push(a + (b - a) * i / 5);
+        }
+        return r;
+      };
+
+      const lb = (k, l) => l
+        ? `10<tspan dy="-5" font-size="9">${k}</tspan>`
+        : nf(k, Math.abs(k) < 10 ? 2 : 1);
+
+      let g = '';
+
+      // Grille et graduations horizontales / verticales
+      tk(x0, x1, o.xl).forEach(k => {
+        const x = L + (k - x0) / (x1 - x0) * (W - L - R);
+        g += `<path d="M${x} ${T}V${H - B}" class="gr"/><text x="${x}" y="${H - B + 16}" text-anchor="middle">${lb(k, o.xl)}</text>`;
+      });
+
+      tk(y0, y1, o.yl).forEach(k => {
+        const y = H - B - (k - y0) / (y1 - y0) * (H - T - B);
+        g += `<path d="M${L} ${y}H${W - R}" class="gr"/><text x="${L - 8}" y="${y + 4}" text-anchor="end">${lb(k, o.yl)}</text>`;
+      });
+
+      // Titres des axes
+      g += `<text x="${(L + W - R) / 2}" y="${H - 6}" font-weight="600" text-anchor="middle">${o.xt || ''}</text>`;
+      g += `<text transform="translate(14 ${(T + H - B) / 2}) rotate(-90)" font-weight="600" text-anchor="middle">${o.yt || ''}</text>`;
+
+      // Tracé des séries
+      S.forEach(s => {
+        const P = (s.p || []).filter(ok);
+
+        // Barres rug sur l'axe
+        if (s.rug) {
+          s.rug.forEach(x => {
+            const rx = px(x);
+            if (rx >= L && rx <= W - R) {
+              g += `<path d="M${rx} ${H - B - 18}V${H - B}" style="stroke:${s.c}" stroke-width="1.5" opacity=".7"/>`;
+            }
+          });
+        }
+
+        // Lignes de données
+        if (P.length > 1 && !s.dots) {
+          g += `<path d="${P.map((q, i) => (i ? 'L' : 'M') + px(q[0]).toFixed(1) + ' ' + py(q[1]).toFixed(1)).join('')}" class="ln" style="stroke:${s.c}"${s.d ? ' stroke-dasharray="6 4"' : ''}/>`;
+        }
+
+        // Points & marqueurs
+        if (s.dots || s.m) {
+          P.forEach(q => {
+            g += `<circle cx="${px(q[0])}" cy="${py(q[1])}" r="${s.m ? 7 : 3.5}" style="fill:${s.m ? 'none' : s.c};stroke:${s.c}" stroke-width="2.5"/>`;
+          });
+        }
+      });
+
+      const container = $('#' + id);
+      if (container) {
+        container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${o.yt || 'Graphique'}">${g}</svg>
+          <div class="lg">${S.filter(s => s.n).map(s => `<span><i style="background:${s.c}"></i>${s.n}</span>`).join('')}</div>`;
+      }
+    }
+
+    /* =============================================================
+       Composants UI pour le panneau de contrôle
+       ============================================================= */
+    const opt = o => Object.keys(o).map(k => `<option value="${k}">${o[k].n}</option>`).join('');
+    const SEL = (id, l, o) => `<label for="${id}">${l}<select id="${id}">${opt(o)}<option value="__custom__">⚙️ Saisir une fonction personnalisée...</option></select></label>
+      <div id="wrap_custom_${id}" style="display:none;margin-bottom:12px;">
+        <label for="custom_expr_${id}">Expression f(x) :
+          <input type="text" id="custom_expr_${id}" placeholder="Ex: Math.sin(x)*Math.exp(-x)" aria-label="Expression de f(x)">
+        </label>
+      </div>`;
+    const RNG = (id, l, mn, mx, st, vl, p = '', s = '') =>
+      `<label for="${id}">${l} : <output id="o_${id}"></output><input type="range" id="${id}" min="${mn}" max="${mx}" step="${st}" value="${vl}" data-p="${p}" data-s="${s}"></label>`;
+    const sl = z => z ? nf(z.m, 2) : '—';
+
+    // Parser sécurisé pour l'entrée manuelle d'une fonction mathématique
+    function parseCustomFunc(expr) {
+      if (!expr || !expr.trim()) return x => x;
+      try {
+        const cleaned = expr
+          .replace(/\bsin\b/g, 'Math.sin')
+          .replace(/\bcos\b/g, 'Math.cos')
+          .replace(/\btan\b/g, 'Math.tan')
+          .replace(/\bexp\b/g, 'Math.exp')
+          .replace(/\bln\b/g, 'Math.log')
+          .replace(/\bsqrt\b/g, 'Math.sqrt')
+          .replace(/\babs\b/g, 'Math.abs')
+          .replace(/\bPI\b/g, 'Math.PI')
+          .replace(/\^/g, '**');
+        return new Function('x', `"use strict"; return (${cleaned});`);
+      } catch (e) {
+        return x => x;
+      }
+    }
+
+    function getActiveIntegrationFunc() {
+      const selected = v('fn');
+      if (selected === '__custom__') {
+        const expr = v('custom_expr_fn') || 'x*x';
+        const customF = parseCustomFunc(expr);
+        // Calcul d'une référence haute précision par Gauss-Legendre 80 nœuds
+        const ref = glq(customF, 0, 1, 80);
+        return { n: 'Personnalisée : ' + expr, f: customF, a: 0, b: 1, r: ref };
+      }
+      return FI[selected] || FI.ell;
+    }
+
+    function getActiveDerivationFunc() {
+      const selected = v('fn');
+      if (selected === '__custom__') {
+        const expr = v('custom_expr_fn') || 'Math.sin(x)';
+        const customF = parseCustomFunc(expr);
+        // Dérivées numériques d'ordre supérieur pour la théorie
+        const dF = x => (customF(x + 1e-6) - customF(x - 1e-6)) / 2e-6;
+        const d2F = x => (customF(x + 1e-4) - 2 * customF(x) + customF(x - 1e-4)) / 1e-8;
+        const d3F = x => (d2F(x + 1e-4) - d2F(x - 1e-4)) / 2e-4;
+        return { n: 'Personnalisée : ' + expr, f: customF, d: dF, d2: d2F, d3: d3F };
+      }
+      return FD[selected] || FD.exp;
+    }
+
+    /* =============================================================
+       Définition des 6 onglets de simulation
+       ============================================================= */
+    const TB = [
+      {
+        k: 'A · Dérivation',
+        id: 'tab-deriv',
+        ctl: SEL('fn', 'Fonction', FD) +
+             RNG('x', 'Point x', -1, 2, 0.1, 1) +
+             '<p class="note">Courbe d’erreur en V : à droite la troncature (pente 1, 2 ou 4), à gauche l’arrondi (pente −1).</p>',
+        run() {
+          const f = getActiveDerivationFunc();
+          const x = +v('x');
+          const d = f.d(x);
+          const c = h => (f.f(x + h) - f.f(x - h)) / (2 * h);
+          const Fo = [], Ce = [], Ri = [];
+
+          for (let k = 0; k <= 64; k++) {
+            const h = 10 ** (-k / 4);
+            Fo.push([h, Math.abs((f.f(x + h) - f.f(x)) / h - d)]);
+            Ce.push([h, Math.abs(c(h) - d)]);
+            Ri.push([h, Math.abs((4 * c(h / 2) - c(h)) / 3 - d)]);
+          }
+
+          const fa = fit(Fo, 1e-5, 0.1, 1e-12);
+          const fc = fit(Ce, 1e-3, 0.1, 1e-12);
+          const fr = fit(Ri, 2e-2, 0.2, 1e-12);
+          const fo = fit(Ce, 1e-15, 1e-11, 1e-20);
+          const mn = p => p.reduce((a, b) => b[1] < a[1] ? b : a);
+          const a = Math.abs(f.f(x));
+
+          draw('c0', [
+            { p: q17(Fo), c: C[1], n: 'avant O(h) · 2 éval.' },
+            { p: q17(Ce), c: C[0], n: 'centrée O(h²) · 2 éval.' },
+            { p: q17(Ri), c: C[2], n: 'centrée + Richardson O(h⁴) · 4 éval.' },
+            ...[fa, fc, fr, fo].filter(Boolean).map(z => z.line)
+          ], { xl: 1, yl: 1, xt: 'pas h', yt: 'erreur sur f′(x)' });
+
+          const d2Val = Math.abs(f.d2(x)) || 1e-12;
+          const d3Val = Math.abs(f.d3(x)) || 1e-12;
+
+          $('#out').innerHTML =
+            kv('Pente avant', '1 → ' + sl(fa), 'théorie 1') +
+            kv('Pente centrée', '2 → ' + sl(fc), 'théorie 2') +
+            kv('Pente Richardson', '4 → ' + sl(fr), 'théorie 4') +
+            kv('Pente arrondi', '−1 → ' + sl(fo), 'théorie −1') +
+            kv('Erreur min. avant', sci(mn(Fo)[1]), 'à h = ' + sci(mn(Fo)[0]) + ' (2 éval.)') +
+            kv('Erreur min. centrée', sci(mn(Ce)[1]), 'à h = ' + sci(mn(Ce)[0]) + ' (2 éval.)') +
+            kv('Erreur min. Richardson', sci(mn(Ri)[1]), 'à h = ' + sci(mn(Ri)[0]) + ' (4 éval.)') +
+            kv('h* théorique', sci(Math.sqrt(2 * EM * a / d2Val)) + ' / ' + sci(Math.cbrt(3 * EM * a / d3Val)), 'avant / centrée');
+        }
+      },
+      {
+        k: 'B · Romberg',
+        id: 'tab-romberg',
+        ctl: SEL('fn', 'Intégrande', FI) +
+             RNG('K', 'Niveaux K (2^K+1 évaluations)', 1, 10, 1, 5) +
+             '<p class="note">Sur l’intégrande périodique (ellipse), les trapèzes convergent déjà très vite : Richardson n’apporte rien.</p>',
+        run() {
+          const o = getActiveIntegrationFunc();
+          const K = +v('K');
+          const R = romb(o.f, o.a, o.b, K);
+
+          let h = '<table><thead><tr><th scope="col">k</th><th scope="col">éval.</th>' +
+            [...Array(K + 1).keys()].map(j => `<th scope="col">j=${j}</th>`).join('') +
+            '</tr></thead><tbody>';
+
+          R.forEach((r, k) => {
+            h += `<tr><th scope="row">${k}</th><td>${2 ** k + 1}</td>` +
+              r.map((x, j) => `<td${k === K && j === K ? ' class="hl"' : ''}>${nf(x, 9)}</td>`).join('') +
+              '</tr>';
+          });
+          h += '</tbody>';
+
+          const ks = [...Array(K).keys()].map(i => i + 1);
+          const E = j => ks.filter(k => k >= j).map(k => [2 ** k + 1, Math.abs(R[k][j] - o.r)]);
+          const T0 = E(0), T1 = E(1);
+          const Td = ks.map(k => [2 ** k + 1, Math.abs(R[k][k] - o.r)]);
+          const f0 = fit(T0), f1 = fit(T1);
+
+          draw('c0', [
+            { p: q17(T0), c: C[5], n: 'trapèzes (j=0)' },
+            { p: q17(T1), c: C[1], n: 'Simpson (j=1)' },
+            { p: q17(Td), c: C[4], n: 'Romberg R(k,k)' },
+            ...[f0, f1].filter(Boolean).map(z => z.line)
+          ], { xl: 1, yl: 1, xt: 'évaluations de f', yt: 'erreur absolue' });
+
+          $('#c1').innerHTML = `<div class="tw">${h}</table></div>`;
+          const e = Math.abs(R[K][K] - o.r);
+          const et = Math.abs(R[K][0] - o.r);
+
+          $('#out').innerHTML =
+            kv('R(K,K)', nf(R[K][K], 10), (2 ** K + 1) + ' évaluations') +
+            kv('Erreur Romberg', sci(e), 'référence ' + nf(o.r, 10)) +
+            kv('Erreur trapèzes', sci(et), 'mêmes évaluations', e > et * 1.5 && et > 1e-15) +
+            kv('Pente trapèzes (vs évaluations)', sl(f0), 'théorie −2') +
+            kv('Pente Simpson', sl(f1), 'théorie −4');
+        }
+      },
+      {
+        k: 'C · Gauss–Legendre',
+        id: 'tab-gauss',
+        ctl: SEL('fn', 'Intégrande', FI) +
+             RNG('n', 'Nombre de nœuds n', 1, 40, 1, 5) +
+             '<p class="note">Exacte jusqu’au degré 2n−1. Les nœuds sont les racines de Pₙ (Newton), calculés ici à la main.</p>',
+        run() {
+          const o = getActiveIntegrationFunc();
+          const n = +v('n');
+          const I = glq(o.f, o.a, o.b, n);
+          const [x, w] = gl(n);
+          const m = (o.a + o.b) / 2;
+          const h = (o.b - o.a) / 2;
+          const xs = x.map(t => m + h * t);
+          const cv = [];
+
+          for (let i = 0; i <= 200; i++) {
+            const t = o.a + (o.b - o.a) * i / 200;
+            cv.push([t, o.f(t)]);
+          }
+
+          draw('c0', [
+            { p: cv, c: C[0], n: 'f(x)' },
+            { p: xs.map(t => [t, o.f(t)]), c: C[3], dots: 1, rug: xs, n: n + ' nœuds de Gauss–Legendre' }
+          ], { xt: 'x', yt: 'f(x)', h: 240 });
+
+          const G = [], Tt = [];
+          for (let k = 1; k <= 40; k++) {
+            G.push([k, Math.abs(glq(o.f, o.a, o.b, k) - o.r)]);
+            if (k > 1) Tt.push([k, Math.abs(trap(o.f, o.a, o.b, k - 1) - o.r)]);
+          }
+          const fg = fit(G, 4, 40, 1e-14);
+
+          draw('c1', [
+            { p: q17(G), c: C[0], n: 'Gauss–Legendre (n évaluations)' },
+            { p: q17(Tt), c: C[5], n: 'trapèzes à n évaluations (coût égal)' },
+            { p: [[n, Math.max(Math.abs(I - o.r), 1e-17)]], c: C[3], m: 1, n: 'n choisi' },
+            ...(fg && v('fn') === 'sqrt' ? [fg.line] : [])
+          ], { xl: 1, yl: 1, xt: 'évaluations de f', yt: 'erreur absolue' });
+
+          $('#out').innerHTML =
+            kv('Valeur', nf(I, 10), n + ' évaluations') +
+            kv('Erreur', sci(Math.abs(I - o.r)), 'référence ' + nf(o.r, 10)) +
+            kv('Degré exact', 2 * n - 1, 'polynômes intégrés exactement') +
+            (v('fn') === 'sqrt'
+              ? kv('Pente mesurée', sl(fg), 'théorie −3 (singularité)')
+              : kv('Convergence', 'géométrique', 'fonction analytique')) +
+            kv('Σ des poids', nf(w.reduce((a, b) => a + b), 12), '= 2, tous > 0');
+        }
+      },
+      {
+        k: 'D · Simpson adaptatif',
+        id: 'tab-asimp',
+        ctl: SEL('fn', 'Intégrande', FI) +
+             RNG('e', 'Tolérance ε', 2, 12, 0.5, 8, '10^−') +
+             '<p class="note">Critère |Sg+Sd−S| ≤ 15ε, puis subdivision avec ε/2. Les traits rouges sont les points évalués.</p>',
+        run() {
+          const o = getActiveIntegrationFunc();
+          const e = 10 ** -v('e');
+          const r = asimp(o.f, o.a, o.b, e);
+          const er = Math.abs(r.I - o.r);
+          const cv = [];
+
+          for (let i = 0; i <= 300; i++) {
+            const t = o.a + (o.b - o.a) * i / 300;
+            cv.push([t, o.f(t)]);
+          }
+
+          draw('c0', [
+            { p: cv, c: C[0], n: 'f(x)' },
+            { p: [], c: C[3], rug: r.pts, n: r.ev + ' points évalués' }
+          ], { xt: 'x', yt: 'f(x)', h: 230 });
+
+          const A = [];
+          for (let k = 2; k <= 12; k += 0.5) {
+            const s = asimp(o.f, o.a, o.b, 10 ** -k);
+            A.push([10 ** -k, s.ev]);
+          }
+          const fa = fit(A, 0, 1, 0);
+
+          draw('c1', [
+            { p: A, c: C[2], n: 'évaluations selon ε' },
+            { p: [[e, r.ev]], c: C[3], m: 1, n: 'ε choisi' },
+            ...(fa ? [fa.line] : [])
+          ], { xl: 1, yl: 1, xt: 'tolérance ε', yt: 'évaluations de f' });
+
+          let n = 2;
+          while (n < 2 ** 21 && Math.abs(simp(o.f, o.a, o.b, n) - o.r) > e) n *= 2;
+          const lim = n >= 2 ** 21;
+
+          $('#out').innerHTML =
+            kv('Valeur', nf(r.I, 10), 'ε = ' + sci(e)) +
+            kv('Erreur réelle', sci(er), er > e ? 'dépasse ε : estimateur trompé' : '≤ ε', er > e) +
+            kv('Évaluations adaptatif', r.ev, '') +
+            kv('Simpson uniforme', (lim ? '> ' : '') + big(n + 1), 'même tolérance') +
+            kv('Gain', nf((n + 1) / r.ev, 1) + ' ×', 'évaluations économisées') +
+            kv('Pente coût vs ε', sl(fa), 'théorie lisse −0,25');
+        }
+      },
+      {
+        k: 'E · Monte-Carlo',
+        id: 'tab-montecarlo',
+        ctl: SEL('kd', 'Intégrale', {
+          0: { n: 'e^(−|x|²) sur [0,1]^d' },
+          1: { n: 'Volume de la boule unité de ℝ^d' }
+        }) +
+        RNG('d', 'Dimension d', 1, 10, 1, 5) +
+        RNG('N', 'Nombre de tirages N', 2, 6, 0.25, 4, '10^') +
+        '<button id="rr" class="action-btn">🎲 Relancer le tirage aléatoire</button>' +
+        '<p class="note">Erreur Monte-Carlo ∝ N^(−1/2) quelle que soit d ; grille : erreur ∝ N^(−2/d) avec N = m^d.</p>',
+        run() {
+          const kd = +v('kd');
+          const d = +v('d');
+          const N = Math.round(10 ** v('N'));
+          const ex = kd ? Vb(d) : C1 ** d;
+          const seed = window.__seed = window.__seed || 1;
+          const r = mcRun(kd, d, N, seed);
+          const er = Math.abs(r.v - ex);
+
+          const Ns = [100, 316, 1000, 3162, 1e4, 31623, 1e5];
+          const Mc = Ns.map(n => {
+            let s = 0;
+            for (let z = 0; z < 15; z++) s += Math.abs(mcRun(kd, d, n, z * 7919 + n).v - ex);
+            return [n, s / 15];
+          });
+
+          const Gd = [];
+          for (let m = 2; m ** d <= 2e5; m++) {
+            Gd.push([m ** d, Math.abs(grid(kd, d, m) - ex)]);
+          }
+
+          const fm = fit(Mc, 0, 1e99, 0);
+          const fg = Gd.length > 2 ? fit(Gd, 0, 1e99, 0) : null;
+          const mg = Math.max(2, Math.floor(N ** (1 / d) + 1e-9));
+          const ng = mg ** d;
+          const eg = ng <= 3e6 ? Math.abs(grid(kd, d, mg) - ex) : NaN;
+
+          draw('c0', [
+            { p: q17(Gd), c: C[1], n: 'grille (point milieu), m^d évaluations', dots: Gd.length < 3 },
+            { p: q17(Mc), c: C[3], d: 1, n: 'Monte-Carlo (moyenne de 15 tirages)' },
+            { p: [[N, Math.max(er, 1e-17)]], c: C[0], m: 1, n: 'tirage choisi' },
+            ...[fm, fg].filter(Boolean).map(z => z.line)
+          ], { xl: 1, yl: 1, xt: 'évaluations de f', yt: 'erreur absolue', h: 310 });
+
+          const ci = r.se * 1.96;
+          $('#out').innerHTML =
+            kv('Estimation', nf(r.v, 6), 'exact ' + nf(ex, 6)) +
+            kv('IC à 95 %', '± ' + sci(ci), '[' + nf(r.v - ci, 4) + ' ; ' + nf(r.v + ci, 4) + ']') +
+            kv('Erreur du tirage', sci(er), er <= ci ? 'dans l’IC' : 'hors de l’IC (≈5 % des cas)', er > ci) +
+            kv('Pente Monte-Carlo', sl(fm), 'théorie −0,5') +
+            kv('Pente grille', sl(fg), 'théorie −2/d = ' + nf(-2 / d, 2)) +
+            kv('Grille à ≈ N', isFinite(eg) ? sci(eg) : '—', 'm = ' + mg + ', ' + big(ng) + ' évaluations');
+        }
+      },
+      {
+        k: '★ Coût égal',
+        id: 'tab-cost',
+        ctl: SEL('fn', 'Intégrande', FI) +
+             RNG('t', 'Tolérance visée', 2, 12, 1, 6, '10^−') +
+             '<p class="note">Toutes les méthodes sont comparées au même nombre d’évaluations de f, jamais au même pas h.</p>',
+        run() {
+          const o = getActiveIntegrationFunc();
+          const tol = 10 ** -v('t');
+          const R = romb(o.f, o.a, o.b, 10);
+          const ks = [...Array(10).keys()].map(i => i + 1);
+          const er = j => ks.filter(k => k >= j).map(k => [2 ** k + 1, Math.abs(R[k][j] - o.r)]);
+
+          const Gn = [2, 3, 4, 5, 6, 8, 10, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512];
+          const P = {
+            'trapèzes': er(0),
+            'Simpson': er(1),
+            'Romberg': ks.map(k => [2 ** k + 1, Math.abs(R[k][k] - o.r)]),
+            'Gauss–Legendre': Gn.map(n => [n, Math.abs(glq(o.f, o.a, o.b, n) - o.r)]),
+            'Simpson adaptatif': [...Array(10).keys()].map(i => {
+              const s = asimp(o.f, o.a, o.b, 10 ** -(i + 2));
+              return [s.ev, Math.abs(s.I - o.r)];
+            }),
+            'Monte-Carlo': [100, 316, 1000, 3162, 1e4, 31623, 1e5].map(n => {
+              let s = 0;
+              for (let z = 0; z < 15; z++) {
+                const r = rng(z * 31 + n);
+                let a = 0;
+                for (let i = 0; i < n; i++) a += o.f(o.a + (o.b - o.a) * r());
+                s += Math.abs((o.b - o.a) * a / n - o.r);
+              }
+              return [n, s / 15];
+            })
+          };
+
+          const cl = ['trapèzes', 'Simpson', 'Romberg', 'Gauss–Legendre', 'Simpson adaptatif', 'Monte-Carlo'];
+          const S = cl.map((k, i) => ({
+            p: q17(P[k]),
+            c: [C[5], C[1], C[4], C[0], C[2], C[3]][i],
+            n: k,
+            d: k === 'Monte-Carlo'
+          }));
+
+          draw('c0', S, { xl: 1, yl: 1, xt: 'évaluations de f', yt: 'erreur absolue', h: 330 });
+
+          let h = '<table><thead><tr><th scope="col" class="al">Méthode</th><th scope="col">Évaluations pour atteindre 10^−' + v('t') + '</th></tr></thead><tbody>';
+          const cs = cl.map(k => [k, cost(tol, P[k])]);
+          const best = Math.min(...cs.map(a => a[1][0]));
+
+          cs.forEach(([k, c]) => {
+            h += `<tr><td class="al">${k}</td><td${c[0] === best ? ' class="hl"' : ''}>${big(c[0])}${c[1] ? ' *' : ''}</td></tr>`;
+          });
+          h += '</tbody>';
+
+          $('#c1').innerHTML = `<div class="tw">${h}</table><p class="lg" style="margin:8px 8px 0">* Extrapolé par la loi de puissance mesurée. En gras : la méthode la moins coûteuse.</p></div>`;
+
+          const bestEntry = cs.find(a => a[1][0] === best);
+          $('#out').innerHTML =
+            kv('Gagnante', bestEntry ? bestEntry[0] : '—', big(best) + ' évaluations') +
+            kv('Intégrande', o.n.split(' (')[0], 'tolérance ' + sci(tol));
+        }
+      }
+    ];
+
+    /* =============================================================
+       Contrôle d'exécution, onglets & thèmes
+       ============================================================= */
+    let cur = 0;
+    let tm;
+
+    function go() {
+      document.querySelectorAll('#ctl input[type=range]').forEach(i => {
+        const out = $('#o_' + i.id);
+        if (out) {
+          out.textContent = (i.dataset.p || '') + i.value + (i.dataset.s || '');
+        }
+      });
+
+      // Gestion de l'affichage du champ de fonction personnalisée
+      const fnSel = $('#fn');
+      const customWrap = $('#wrap_custom_fn');
+      if (fnSel && customWrap) {
+        customWrap.style.display = fnSel.value === '__custom__' ? 'block' : 'none';
+      }
+
+      clearTimeout(tm);
+      tm = setTimeout(() => {
+        $('#c1').innerHTML = '';
+        try {
+          TB[cur].run();
+        } catch (e) {
+          console.error(e);
+          $('#out').innerHTML = kv('Erreur de calcul', String(e), 'Vérifiez les paramètres', 1);
+        }
+      }, (cur === 4 || cur === 5) ? 80 : 0);
+    }
+
+    function tab(i) {
+      cur = i;
+      window.__seed = 1;
+
+      // Mise à jour de l'état ARIA des onglets
+      document.querySelectorAll('#tabs button').forEach((b, j) => {
+        const isSelected = j === i;
+        b.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        b.setAttribute('tabindex', isSelected ? '0' : '-1');
+      });
+
+      $('#ctl').innerHTML = `<div class="ctl-title">Paramètres</div>` + TB[i].ctl;
+
+      // Liaison des événements de saisie
+      $('#ctl').querySelectorAll('input, select').forEach(e => {
+        e.addEventListener('input', go);
+      });
+
+      const rr = $('#rr');
+      if (rr) {
+        rr.onclick = () => {
+          window.__seed = Math.floor(Math.random() * 1e9);
+          go();
+        };
+      }
+
+      try {
+        history.replaceState(null, '', '#' + 'ABCDEF'[i]);
+      } catch (e) {}
+
+      go();
+    }
+
+    // Initialisation des boutons d'onglets avec support complet de navigation clavier
+    const tabsContainer = $('#tabs');
+    tabsContainer.innerHTML = TB.map((t, i) =>
+      `<button role="tab" id="${t.id}" aria-controls="simulation-panel" aria-selected="false" tabindex="-1">${t.k}</button>`
+    ).join('');
+
+    const tabButtons = document.querySelectorAll('#tabs button');
+    tabButtons.forEach((b, i) => {
+      b.onclick = () => tab(i);
+      b.onkeydown = e => {
+        let targetIndex = i;
+        if (e.key === 'ArrowRight') {
+          targetIndex = (i + 1) % tabButtons.length;
+        } else if (e.key === 'ArrowLeft') {
+          targetIndex = (i - 1 + tabButtons.length) % tabButtons.length;
+        } else if (e.key === 'Home') {
+          targetIndex = 0;
+        } else if (e.key === 'End') {
+          targetIndex = tabButtons.length - 1;
+        } else {
+          return;
+        }
+        e.preventDefault();
+        tabButtons[targetIndex].focus();
+        tab(targetIndex);
+      };
+    });
+
+    /* =============================================================
+       Gestionnaire de thème (Clair / Sombre avec mémorisation)
+       ============================================================= */
+    const themeBtn = $('#theme-toggle');
+    const themeIcon = $('#theme-icon');
+    const themeText = $('#theme-text');
+
+    function applyTheme(theme) {
+      if (theme === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        if (themeIcon) themeIcon.textContent = '☀️';
+        if (themeText) themeText.textContent = 'Mode clair';
+      } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+        if (themeIcon) themeIcon.textContent = '🌙';
+        if (themeText) themeText.textContent = 'Mode sombre';
+      }
+      localStorage.setItem('simulator-theme', theme);
+      go(); // Redessine les graphes avec les nouvelles variables
+    }
+
+    const savedTheme = localStorage.getItem('simulator-theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    if (savedTheme) {
+      applyTheme(savedTheme);
+    } else {
+      applyTheme(prefersDark ? 'dark' : 'light');
+    }
+
+    if (themeBtn) {
+      themeBtn.onclick = () => {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        applyTheme(isDark ? 'light' : 'dark');
+      };
+    }
+
+    // Démarrage sur le premier onglet ou le hash d'URL
+    const initialIndex = Math.max(0, 'ABCDEF'.indexOf((location.hash || '#A').slice(1)));
+    tab(initialIndex);
+    window.__tab = tab;
+  </script>
+</body>
+</html>
