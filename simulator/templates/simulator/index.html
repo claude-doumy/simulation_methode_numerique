@@ -1,0 +1,166 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Simulateur 3D de Méthodes Numériques — Django & Three.js</title>
+  <link rel="stylesheet" href="{% static 'simulator/css/style.css' %}">
+  <!-- Three.js et OrbitControls intégrés en local pour fiabilité totale -->
+  <script src="{% static 'simulator/js/three.min.js' %}"></script>
+  <script src="{% static 'simulator/js/OrbitControls.js' %}"></script>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-badge">3D REAL-WORLD</div>
+      <div class="brand-text">
+        <h1>Simulateur d'Analyse Numérique 3D</h1>
+        <p>Plateforme Django • Dérivation & Intégration sur cas physiques réels</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <a href="{% url 'simulator:export_csv' %}" class="btn btn-sm" title="Exporter l'historique en CSV">📥 CSV</a>
+      <a href="{% url 'simulator:export_json' %}" class="btn btn-sm" title="Exporter l'historique en JSON">📥 JSON</a>
+      <button id="theme-toggle-btn" class="btn btn-sm" title="Basculer Mode Clair / Sombre">🌙 Thème</button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="tabs-bar" role="tablist">
+    <button class="tab-btn active" data-tab="drone" role="tab" aria-selected="true">
+      🚁 1. Dérivation 3D (Drone Autonome)
+    </button>
+    <button class="tab-btn" data-tab="dam" role="tab" aria-selected="false">
+      🌊 2. Intégration 3D (Retenue Barrage)
+    </button>
+    <button class="tab-btn" data-tab="montecarlo" role="tab" aria-selected="false">
+      🎲 3. Monte-Carlo 3D (Formes Complexes)
+    </button>
+    <button class="tab-btn" data-tab="benchmark" role="tab" aria-selected="false">
+      ⚖️ 4. Comparatif Coût Égal (N_eval)
+    </button>
+  </nav>
+
+  <!-- Main Grid App Container -->
+  <main class="app-container">
+
+    <!-- LEFT SIDEBAR: Controls -->
+    <aside class="controls-sidebar">
+
+      <!-- Dynamic Controls injected via JS -->
+      <div class="panel-card" id="scenario-controls">
+        <div class="panel-title">⚙️ Paramètres du Scénario</div>
+        <div id="controls-container">
+          <!-- Populated by app.js depending on active tab -->
+        </div>
+      </div>
+
+      <!-- Action Card -->
+      <div class="panel-card">
+        <div class="panel-title">💾 Enregistrement & Action</div>
+        <button id="btn-save-simulation" class="btn btn-primary" style="width: 100%; justify-content: center;">
+          💾 Enregistrer ce Run
+        </button>
+        <p id="save-status-msg" style="font-size: 11px; color: var(--muted); margin-top: 6px; text-align: center;"></p>
+      </div>
+
+      <!-- Real-World Engineering Context -->
+      <div class="panel-card">
+        <div class="panel-title">📚 Cas Réel & Pédagogie</div>
+        <div id="guide-info" class="guide-content">
+          <!-- Updated dynamically -->
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- CENTER: Three.js 3D Viewport -->
+    <section class="viewport-area" aria-label="Visualisation 3D">
+      <div id="canvas3d-container"></div>
+
+      <!-- Overlay Top -->
+      <div class="overlay-top">
+        <div class="overlay-card" id="overlay-status">
+          <strong>Scénario :</strong> <span id="overlay-scenario-name">Cinématique Drone 3D</span>
+        </div>
+        <div class="overlay-card" style="display:flex; gap: 8px;">
+          <button id="btn-reset-cam" class="btn btn-sm" style="background:rgba(255,255,255,0.1); border:none; color:#fff;">🎥 Centrer Caméra</button>
+          <button id="btn-toggle-wireframe" class="btn btn-sm" style="background:rgba(255,255,255,0.1); border:none; color:#fff;">🕸️ Fil de Fer</button>
+        </div>
+      </div>
+
+      <!-- Overlay Bottom (Animation controls for Drone) -->
+      <div class="overlay-bottom" id="drone-animation-bar">
+        <div class="playback-controls">
+          <button id="btn-play-pause" class="btn btn-sm btn-primary">⏸️ Pause</button>
+          <label style="font-size: 12px; color: #fff; display: flex; align-items: center; gap: 6px;">
+            Temps : <span id="anim-time-val">0.0</span>s
+            <input type="range" id="anim-scrubber" min="0" max="100" value="0" style="width: 120px;">
+          </label>
+          <select id="anim-speed" class="form-control" style="width: 75px; padding: 3px 6px; font-size: 11px;">
+            <option value="0.5">0.5x</option>
+            <option value="1.0" selected>1.0x</option>
+            <option value="2.0">2.0x</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT SIDEBAR: Telemetry, KPIs, Charts & History -->
+    <aside class="telemetry-sidebar">
+
+      <!-- Telemetry KPIs -->
+      <div class="panel-card">
+        <div class="panel-title">📊 Métriques & Télémétrie</div>
+        <div class="kpi-grid" id="kpi-container">
+          <!-- Injected dynamically -->
+        </div>
+      </div>
+
+      <!-- Real-time Chart (V-Curve, Convergence or Slices) -->
+      <div class="panel-card">
+        <div class="panel-title" id="chart-title">📈 Analyse de Convergence / Erreur</div>
+        <div class="chart-box" id="chart-container">
+          <svg id="svg-chart" width="100%" height="100%" viewBox="0 0 300 180" style="overflow: visible;"></svg>
+        </div>
+      </div>
+
+      <!-- History of Runs -->
+      <div class="panel-card">
+        <div class="panel-title">📜 Derniers Runs Enregistrés</div>
+        <div style="max-height: 180px; overflow-y: auto;">
+          <table class="history-table" id="history-table">
+            <thead>
+              <tr>
+                <th>Scénario</th>
+                <th>N_eval</th>
+                <th>Erreur</th>
+                <th>Heure</th>
+              </tr>
+            </thead>
+            <tbody id="history-body">
+              {% for item in history %}
+              <tr>
+                <td>{{ item.get_scenario_display|truncatechars:14 }}</td>
+                <td>{{ item.evaluations }}</td>
+                <td>{{ item.relative_error_percent|floatformat:4 }}%</td>
+                <td>{{ item.created_at|date:"H:i" }}</td>
+              </tr>
+              {% empty %}
+              <tr id="empty-history-row"><td colspan="4" style="color:var(--muted); text-align:center;">Aucun run enregistré</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <script src="{% static 'simulator/js/app.js' %}"></script>
+</body>
+</html>
