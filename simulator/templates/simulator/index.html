@@ -2,137 +2,272 @@
 <!DOCTYPE html>
 <html lang="fr" data-theme="dark">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Simulateur 3D de Méthodes Numériques — Django & Three.js</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulateur 3D d'Analyse Numérique - Applications Physiques Réelles</title>
   <link rel="stylesheet" href="{% static 'simulator/css/style.css' %}">
-  <!-- Three.js et OrbitControls intégrés en local pour fiabilité totale -->
+  <!-- Three.js et OrbitControls chargés localement -->
   <script src="{% static 'simulator/js/three.min.js' %}"></script>
   <script src="{% static 'simulator/js/OrbitControls.js' %}"></script>
 </head>
 <body>
-
-  <!-- Header -->
-  <header>
-    <div class="brand">
-      <div class="brand-badge">3D REAL-WORLD</div>
-      <div class="brand-text">
-        <h1>Simulateur d'Analyse Numérique 3D</h1>
-        <p>Plateforme Django • Dérivation & Intégration sur cas physiques réels</p>
+  <!-- Header principal -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-badge">3D REAL-WORLD</div>
+      <div>
+        <h1 class="app-title">Simulateur d'Analyse Numérique 3D</h1>
+        <p class="app-subtitle">Plateforme Django • Dérivation & Intégration sur cas physiques réels</p>
       </div>
     </div>
-    <div class="header-actions">
-      <a href="{% url 'simulator:export_csv' %}" class="btn btn-sm" title="Exporter l'historique en CSV">📥 CSV</a>
-      <a href="{% url 'simulator:export_json' %}" class="btn btn-sm" title="Exporter l'historique en JSON">📥 JSON</a>
-      <button id="theme-toggle-btn" class="btn btn-sm" title="Basculer Mode Clair / Sombre">🌙 Thème</button>
+    <div class="header-right">
+      <a href="{% url 'simulator:export_csv' %}" class="btn-tool" title="Exporter l'historique en CSV">
+        <span>📥 CSV</span>
+      </a>
+      <a href="{% url 'simulator:export_json' %}" class="btn-tool" title="Exporter l'historique en JSON">
+        <span>📦 JSON</span>
+      </a>
+      <button id="themeToggleBtn" class="btn-tool theme-toggle">
+        <span id="themeIcon">☀️ Thème Clair</span>
+      </button>
     </div>
   </header>
 
-  <!-- Navigation Tabs -->
-  <nav class="tabs-bar" role="tablist">
-    <button class="tab-btn active" data-tab="drone" role="tab" aria-selected="true">
-      🚁 1. Dérivation 3D (Drone Autonome)
+  <!-- Barre de sélection des Scénarios réels (Tabs) -->
+  <nav class="scenario-nav">
+    <button class="nav-tab active" data-scenario="drone">
+      <span>🛸 1. Drone 3D (Trajectoires)</span>
     </button>
-    <button class="tab-btn" data-tab="dam" role="tab" aria-selected="false">
-      🌊 2. Intégration 3D (Retenue Barrage)
+    <button class="nav-tab" data-scenario="dam">
+      <span>🌊 2. Barrage Hydraulique</span>
     </button>
-    <button class="tab-btn" data-tab="montecarlo" role="tab" aria-selected="false">
-      🎲 3. Monte-Carlo 3D (Formes Complexes)
+    <button class="nav-tab" data-scenario="turbine">
+      <span>💨 3. Éolienne BEM (Aérodynamique)</span>
     </button>
-    <button class="tab-btn" data-tab="benchmark" role="tab" aria-selected="false">
-      ⚖️ 4. Comparatif Coût Égal (N_eval)
+    <button class="nav-tab" data-scenario="rocket">
+      <span>🚀 4. Rentrée Spatiale & G-Force</span>
+    </button>
+    <button class="nav-tab" data-scenario="monte_carlo">
+      <span>🎲 5. Monte-Carlo 3D</span>
+    </button>
+    <button class="nav-tab" data-scenario="benchmark">
+      <span>⚖️ 6. Benchmark Coût Égal</span>
     </button>
   </nav>
 
-  <!-- Main Grid App Container -->
-  <main class="app-container">
+  <!-- Layout Principal : Panneau latéral gauche | Scène 3D centrale | Télémétrie droite -->
+  <main class="main-layout">
+    <!-- Panneau de Contrôle Latéral -->
+    <aside class="control-panel">
+      <div class="panel-section">
+        <h2 class="section-title">⚙️ PARAMÈTRES DU SCÉNARIO</h2>
 
-    <!-- LEFT SIDEBAR: Controls -->
-    <aside class="controls-sidebar">
+        <!-- Contrôles Scénario 1 : DRONE 3D -->
+        <div id="controls-drone" class="scenario-controls active">
+          <div class="form-group">
+            <label for="droneTrajectorySelect">Trajectoire 3D du Drone :</label>
+            <select id="droneTrajectorySelect" class="form-select">
+              <option value="helix" selected>🌀 Hélice Ascensionnelle (Standard)</option>
+              <option value="figure8">♾️ Lemniscate / Figure en 8 (Virages serrés)</option>
+              <option value="slalom">⚡ Slalom Acrobatique (Obstacles)</option>
+              <option value="spiral">🌪️ Spirale Conique (Atterrissage d'urgence)</option>
+            </select>
+          </div>
 
-      <!-- Dynamic Controls injected via JS -->
-      <div class="panel-card" id="scenario-controls">
-        <div class="panel-title">⚙️ Paramètres du Scénario</div>
-        <div id="controls-container">
-          <!-- Populated by app.js depending on active tab -->
+          <div class="form-group">
+            <label for="droneRadiusRange">Rayon / Envergure : <span id="droneRadiusVal" class="value-badge">15.0 m</span></label>
+            <input type="range" id="droneRadiusRange" min="5" max="30" step="1" value="15" class="slider">
+          </div>
+
+          <div class="form-group">
+            <label for="droneAltitudeRange">Plafond d'Altitude : <span id="droneAltitudeVal" class="value-badge">12.0 m</span></label>
+            <input type="range" id="droneAltitudeRange" min="5" max="35" step="1" value="12" class="slider">
+          </div>
+
+          <div class="form-group">
+            <label for="droneSpeedRange">Facteur Vitesse : <span id="droneSpeedVal" class="value-badge">1.0x</span></label>
+            <input type="range" id="droneSpeedRange" min="0.5" max="2.5" step="0.1" value="1.0" class="slider">
+          </div>
+
+          <div class="form-group">
+            <label for="droneDtRange">Pas d'échantillonnage GPS / IMU Δt : <span id="droneDtVal" class="value-badge">0.100 s</span></label>
+            <input type="range" id="droneDtRange" min="0.01" max="0.5" step="0.01" value="0.10" class="slider">
+            <p class="help-text">Pas optimal : équilibre entre erreur de troncature O(h^p) et erreur d'arrondi machine.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="droneNoiseRange">Bruit Capteur IMU (Gigue) : <span id="droneNoiseVal" class="value-badge">0.00</span></label>
+            <input type="range" id="droneNoiseRange" min="0" max="1" step="0.05" value="0.0" class="slider">
+          </div>
+
+          <!-- Contrôles de lecture timeline -->
+          <div class="timeline-controls">
+            <button id="dronePlayBtn" class="btn-play">▶ Lecture</button>
+            <button id="droneResetTimelineBtn" class="btn-secondary">↺ Recommencer</button>
+          </div>
+          <div class="form-group" style="margin-top: 10px;">
+            <label for="droneTimelineRange">Position temporelle t(s) : <span id="droneTimelineVal" class="value-badge">0.0 s</span></label>
+            <input type="range" id="droneTimelineRange" min="0" max="12" step="0.05" value="0" class="slider">
+          </div>
+        </div>
+
+        <!-- Contrôles Scénario 2 : BARRAGE -->
+        <div id="controls-dam" class="scenario-controls">
+          <div class="form-group">
+            <label for="damMethodSelect">Méthode d'Intégration :</label>
+            <select id="damMethodSelect" class="form-select">
+              <option value="simpson" selected>Simpson Composite O(h⁴)</option>
+              <option value="trapezoid">Trapèzes Composite O(h²)</option>
+              <option value="romberg">Romberg (Richardson)</option>
+              <option value="gauss">Gauss–Legendre (Ordre optimal)</option>
+              <option value="adaptive">Simpson Adaptatif (Tolérance locale)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="damSlicesRange">Nombre de Tranches N : <span id="damSlicesVal" class="value-badge">12</span></label>
+            <input type="range" id="damSlicesRange" min="4" max="40" step="2" value="12" class="slider">
+          </div>
+        </div>
+
+        <!-- Contrôles Scénario 3 : ÉOLIENNE -->
+        <div id="controls-turbine" class="scenario-controls">
+          <div class="form-group">
+            <label for="turbineMethodSelect">Méthode d'Intégration :</label>
+            <select id="turbineMethodSelect" class="form-select">
+              <option value="simpson" selected>Simpson Composite O(h⁴)</option>
+              <option value="trapezoid">Trapèzes O(h²)</option>
+              <option value="gauss">Gauss–Legendre</option>
+              <option value="romberg">Romberg</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="turbineRadiusRange">Rayon du Rotor (Pale) : <span id="turbineRadiusVal" class="value-badge">50 m</span></label>
+            <input type="range" id="turbineRadiusRange" min="20" max="90" step="5" value="50" class="slider">
+          </div>
+          <div class="form-group">
+            <label for="turbineWindRange">Vitesse du Vent (m/s) : <span id="turbineWindVal" class="value-badge">12.0 m/s</span></label>
+            <input type="range" id="turbineWindRange" min="4" max="25" step="0.5" value="12.0" class="slider">
+          </div>
+          <div class="form-group">
+            <label for="turbineElementsRange">Discrétisation Pales (Anneaux) : <span id="turbineElementsVal" class="value-badge">16</span></label>
+            <input type="range" id="turbineElementsRange" min="4" max="40" step="2" value="16" class="slider">
+          </div>
+        </div>
+
+        <!-- Contrôles Scénario 4 : RENTRÉE SPATIALE -->
+        <div id="controls-rocket" class="scenario-controls">
+          <div class="form-group">
+            <label for="rocketDtRange">Pas de calcul télémétrie Δt : <span id="rocketDtVal" class="value-badge">0.05 s</span></label>
+            <input type="range" id="rocketDtRange" min="0.01" max="0.3" step="0.01" value="0.05" class="slider">
+          </div>
+          <div class="form-group">
+            <label for="rocketNoiseRange">Bruit Accéléromètre : <span id="rocketNoiseVal" class="value-badge">0.00</span></label>
+            <input type="range" id="rocketNoiseRange" min="0" max="1" step="0.05" value="0.0" class="slider">
+          </div>
+          <div class="timeline-controls">
+            <button id="rocketPlayBtn" class="btn-play">▶ Lancer Rentrée</button>
+            <button id="rocketResetBtn" class="btn-secondary">↺ Réinitialiser</button>
+          </div>
+          <div class="form-group" style="margin-top: 10px;">
+            <label for="rocketTimelineRange">Temps de rentrée : <span id="rocketTimelineVal" class="value-badge">0.0 s</span></label>
+            <input type="range" id="rocketTimelineRange" min="0" max="18" step="0.1" value="0" class="slider">
+          </div>
+        </div>
+
+        <!-- Contrôles Scénario 5 : MONTE-CARLO 3D -->
+        <div id="controls-monte_carlo" class="scenario-controls">
+          <div class="form-group">
+            <label for="mcShapeSelect">Géométrie 3D à intégrer :</label>
+            <select id="mcShapeSelect" class="form-select">
+              <option value="dome" selected>Dôme Géodésique (Hémisphère R=5m)</option>
+              <option value="torus">Tore de Confinement Tokamak</option>
+              <option value="dam_vault">Voûte Paraboloïde Asymétrique</option>
+              <option value="sphere">Sphère Unité</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="mcSamplesRange">Nombre de tirages stochastiques N : <span id="mcSamplesVal" class="value-badge">3000</span></label>
+            <input type="range" id="mcSamplesRange" min="500" max="8000" step="500" value="3000" class="slider">
+            <p class="help-text">Convergence stochastique en O(1/√N) indépendante de la géométrie.</p>
+          </div>
+
+          <button id="mcResampleBtn" class="btn-primary" style="width: 100%;">🎲 Nouveau Tirage Aléatoire</button>
+        </div>
+
+        <!-- Contrôles Scénario 6 : BENCHMARK -->
+        <div id="controls-benchmark" class="scenario-controls">
+          <div class="form-group">
+            <label for="benchmarkShapeSelect">Scénario physique comparatif :</label>
+            <select id="benchmarkShapeSelect" class="form-select">
+              <option value="dam" selected>Retenue de Barrage Hydraulique (L=200m)</option>
+              <option value="sphere">Volume Réservoir Hémisphérique (R=10m)</option>
+            </select>
+          </div>
+
+          <div class="benchmark-legend">
+            <h4>Légende des Méthodes :</h4>
+            <div class="legend-item"><span class="badge-dot" style="background: #94a3b8;"></span> Trapèzes O(h²)</div>
+            <div class="legend-item"><span class="badge-dot" style="background: #f87171;"></span> Simpson O(h⁴)</div>
+            <div class="legend-item"><span class="badge-dot" style="background: #c084fc;"></span> Romberg Extrapolé</div>
+            <div class="legend-item"><span class="badge-dot" style="background: #60a5fa;"></span> Gauss–Legendre (Championne)</div>
+            <div class="legend-item"><span class="badge-dot" style="background: #34d399;"></span> Simpson Adaptatif</div>
+            <div class="legend-item"><span class="badge-dot" style="background: #fbbf24;"></span> Monte-Carlo O(1/√N)</div>
+          </div>
         </div>
       </div>
 
-      <!-- Action Card -->
-      <div class="panel-card">
-        <div class="panel-title">💾 Enregistrement & Action</div>
-        <button id="btn-save-simulation" class="btn btn-primary" style="width: 100%; justify-content: center;">
-          💾 Enregistrer ce Run
-        </button>
-        <p id="save-status-msg" style="font-size: 11px; color: var(--muted); margin-top: 6px; text-align: center;"></p>
+      <!-- Action d'enregistrement de simulation -->
+      <div class="panel-section">
+        <h2 class="section-title">💾 ENREGISTREMENT & ACTION</h2>
+        <button id="saveRunBtn" class="btn-primary" style="width: 100%;">💾 Enregistrer ce Run</button>
       </div>
 
-      <!-- Real-World Engineering Context -->
-      <div class="panel-card">
-        <div class="panel-title">📚 Cas Réel & Pédagogie</div>
-        <div id="guide-info" class="guide-content">
-          <!-- Updated dynamically -->
-        </div>
+      <!-- Panneau explicatif & Pédagogie -->
+      <div class="panel-section help-box">
+        <h2 class="section-title">📚 CAS RÉEL & PÉDAGOGIE</h2>
+        <div id="pedagogyContent"></div>
       </div>
-
     </aside>
 
-    <!-- CENTER: Three.js 3D Viewport -->
-    <section class="viewport-area" aria-label="Visualisation 3D">
-      <div id="canvas3d-container"></div>
-
-      <!-- Overlay Top -->
-      <div class="overlay-top">
-        <div class="overlay-card" id="overlay-status">
-          <strong>Scénario :</strong> <span id="overlay-scenario-name">Cinématique Drone 3D</span>
+    <!-- Zone Centrale : Rendu 3D WebGL Three.js -->
+    <section class="viewport-panel">
+      <div class="viewport-header">
+        <div class="viewport-title">
+          <span id="currentScenarioBadge">Scénario</span> : <strong id="currentScenarioName">Chargement...</strong>
         </div>
-        <div class="overlay-card" style="display:flex; gap: 8px;">
-          <button id="btn-reset-cam" class="btn btn-sm" style="background:rgba(255,255,255,0.1); border:none; color:#fff;">🎥 Centrer Caméra</button>
-          <button id="btn-toggle-wireframe" class="btn btn-sm" style="background:rgba(255,255,255,0.1); border:none; color:#fff;">🕸️ Fil de Fer</button>
+        <div class="viewport-tools">
+          <button id="resetCameraBtn" class="btn-tool-sm" title="Réinitialiser la caméra">🎥 Centrer Caméra</button>
+          <button id="toggleWireframeBtn" class="btn-tool-sm" title="Activer/Désactiver le fil de fer">❄️ Fil de Fer</button>
         </div>
       </div>
 
-      <!-- Overlay Bottom (Animation controls for Drone) -->
-      <div class="overlay-bottom" id="drone-animation-bar">
-        <div class="playback-controls">
-          <button id="btn-play-pause" class="btn btn-sm btn-primary">⏸️ Pause</button>
-          <label style="font-size: 12px; color: #fff; display: flex; align-items: center; gap: 6px;">
-            Temps : <span id="anim-time-val">0.0</span>s
-            <input type="range" id="anim-scrubber" min="0" max="100" value="0" style="width: 120px;">
-          </label>
-          <select id="anim-speed" class="form-control" style="width: 75px; padding: 3px 6px; font-size: 11px;">
-            <option value="0.5">0.5x</option>
-            <option value="1.0" selected>1.0x</option>
-            <option value="2.0">2.0x</option>
-          </select>
-        </div>
-      </div>
+      <!-- Conteneur Three.js -->
+      <div id="webglContainer" class="webgl-container"></div>
     </section>
 
-    <!-- RIGHT SIDEBAR: Telemetry, KPIs, Charts & History -->
-    <aside class="telemetry-sidebar">
-
-      <!-- Telemetry KPIs -->
-      <div class="panel-card">
-        <div class="panel-title">📊 Métriques & Télémétrie</div>
-        <div class="kpi-grid" id="kpi-container">
-          <!-- Injected dynamically -->
+    <!-- Panneau de Télémétrie Latéral Droit (HUD & Graphes Ultra-Visibles) -->
+    <aside class="telemetry-panel">
+      <div class="panel-section">
+        <h2 class="section-title">📊 MÉTRIQUES & TÉLÉMÉTRIE</h2>
+        <div id="kpiGrid" class="kpi-grid">
+          <!-- Injecté par JavaScript en temps réel -->
         </div>
       </div>
 
-      <!-- Real-time Chart (V-Curve, Convergence or Slices) -->
-      <div class="panel-card">
-        <div class="panel-title" id="chart-title">📈 Analyse de Convergence / Erreur</div>
-        <div class="chart-box" id="chart-container">
-          <svg id="svg-chart" width="100%" height="100%" viewBox="0 0 300 180" style="overflow: visible;"></svg>
+      <div class="panel-section">
+        <h2 class="section-title" id="chartTitle">📈 ANALYSE & ERREUR NUMÉRIQUE</h2>
+        <!-- Graphe SVG Haute-Visibilité Haute Définition -->
+        <div id="chartContainer" class="chart-container">
+          <svg id="svgChart" viewBox="0 0 460 280" class="high-vis-chart"></svg>
         </div>
       </div>
 
-      <!-- History of Runs -->
-      <div class="panel-card">
-        <div class="panel-title">📜 Derniers Runs Enregistrés</div>
-        <div style="max-height: 180px; overflow-y: auto;">
-          <table class="history-table" id="history-table">
+      <div class="panel-section">
+        <h2 class="section-title">📜 DERNIERS RUNS ENREGISTRÉS</h2>
+        <div class="table-container">
+          <table class="history-table">
             <thead>
               <tr>
                 <th>Scénario</th>
@@ -141,26 +276,27 @@
                 <th>Heure</th>
               </tr>
             </thead>
-            <tbody id="history-body">
+            <tbody id="historyTableBody">
               {% for item in history %}
               <tr>
-                <td>{{ item.get_scenario_display|truncatechars:14 }}</td>
+                <td>{{ item.get_scenario_display }}</td>
                 <td>{{ item.evaluations }}</td>
-                <td>{{ item.relative_error_percent|floatformat:4 }}%</td>
-                <td>{{ item.created_at|date:"H:i" }}</td>
+                <td>{{ item.relative_error_percent|floatformat:3 }}%</td>
+                <td>{{ item.created_at|date:"H:i:s" }}</td>
               </tr>
               {% empty %}
-              <tr id="empty-history-row"><td colspan="4" style="color:var(--muted); text-align:center;">Aucun run enregistré</td></tr>
+              <tr>
+                <td colspan="4" class="empty-state">Aucun run enregistré</td>
+              </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       </div>
-
     </aside>
-
   </main>
 
+  <!-- Script Principal de l'Application -->
   <script src="{% static 'simulator/js/app.js' %}"></script>
 </body>
 </html>

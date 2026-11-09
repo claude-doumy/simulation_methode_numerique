@@ -12,10 +12,21 @@ def index(request):
     return render(request, "simulator/index.html", {"history": history})
 
 def api_drone_simulation(request):
-    """Calcul de la trajectoire et cinématique 3D du drone"""
+    """Calcul de la trajectoire et cinématique 3D du drone avec personnalisation"""
     dt = float(request.GET.get("dt", 0.1))
     noise = float(request.GET.get("noise", 0.0))
-    data = engine.drone_flight_trajectory_simulation(dt_input=dt, noise_amplitude=noise)
+    traj_type = request.GET.get("trajectory", "helix")
+    radius = float(request.GET.get("radius", 15.0))
+    altitude = float(request.GET.get("altitude", 10.0))
+    speed_factor = float(request.GET.get("speed_factor", 1.0))
+    data = engine.drone_flight_trajectory_simulation(
+        dt_input=dt,
+        noise_amplitude=noise,
+        trajectory_type=traj_type,
+        radius=radius,
+        altitude=altitude,
+        speed_factor=speed_factor
+    )
     return JsonResponse(data)
 
 def api_dam_simulation(request):
@@ -24,6 +35,27 @@ def api_dam_simulation(request):
     n_slices = int(request.GET.get("slices", 10))
     tol = float(request.GET.get("tolerance", 1e-5))
     data = engine.hydraulic_dam_volume_simulation(method=method, n_slices=n_slices, tolerance=tol)
+    return JsonResponse(data)
+
+def api_turbine_simulation(request):
+    """Calcul aérodynamique de la puissance d'une éolienne"""
+    method = request.GET.get("method", "simpson")
+    n_elements = int(request.GET.get("elements", 16))
+    blade_radius = float(request.GET.get("radius", 50.0))
+    wind_speed = float(request.GET.get("wind_speed", 12.0))
+    data = engine.wind_turbine_power_simulation(
+        method=method,
+        n_elements=n_elements,
+        blade_radius=blade_radius,
+        wind_speed=wind_speed
+    )
+    return JsonResponse(data)
+
+def api_rocket_simulation(request):
+    """Calcul cinématique et facteur de charge G lors d'une rentrée spatiale"""
+    dt = float(request.GET.get("dt", 0.05))
+    noise = float(request.GET.get("noise", 0.0))
+    data = engine.rocket_reentry_trajectory_simulation(dt_input=dt, noise_amplitude=noise)
     return JsonResponse(data)
 
 def api_monte_carlo(request):
