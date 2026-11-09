@@ -1,1105 +1,1228 @@
 /**
- * Application principale du Simulateur Numérique 3D
- * Intègre Three.js, rendu WebGL réactif, API Django et HUD physique
+ * Simulateur 3D d'Analyse Numérique - Frontend Three.js
+ * Scénarios : Drone 3D paramétrable, Barrage, Éolienne, Rentrée Spatiale, Monte-Carlo 3D, Benchmark
+ * Graphes SVG ultra-visibles, HUD Télémétrie, Thèmes, Contrôles 3D
  */
 
-// État global
-const state = {
-  currentTab: 'drone',
-  theme: localStorage.getItem('theme') || 'dark',
-  wireframe: false,
-  isPlaying: true,
-  playSpeed: 1.0,
-  currentTime: 0.0,
-  maxTime: 12.0,
-  droneData: null,
-  damData: null,
-  mcData: null,
-  bmData: null
-};
+(function () {
+  'use strict';
 
-// -----------------------------------------------------------------------------
-// 1. GESTION DU THÈME
-// -----------------------------------------------------------------------------
-function applyTheme(t) {
-  state.theme = t;
-  document.documentElement.setAttribute('data-theme', t);
-  localStorage.setItem('theme', t);
-  const btn = document.getElementById('theme-toggle-btn');
-  if (btn) btn.textContent = t === 'dark' ? '☀️ Thème Clair' : '🌙 Thème Sombre';
-  if (scene) {
-    scene.background = new THREE.Color(t === 'dark' ? 0x050811 : 0xe2e8f0);
-    if (gridHelper) {
-      gridHelper.material.color.setHex(t === 'dark' ? 0x22344f : 0x94a3b8);
-    }
-  }
-}
+  // --- ÉTAT GLOBAL ---
+  let currentScenario = 'drone';
+  let isWireframe = false;
+  let scene, camera, renderer, controls;
+  let dynamicGroup = new THREE.Group();
+  let animationFrameId = null;
 
-document.getElementById('theme-toggle-btn').addEventListener('click', () => {
-  applyTheme(state.theme === 'dark' ? 'light' : 'dark');
-});
+  // Variables animation drone
+  let droneData = null;
+  let isDronePlaying = false;
+  let droneAnimIndex = 0;
+  let droneMeshGroup = null;
+  let velArrowHelper = null;
+  let accArrowHelper = null;
 
-// -----------------------------------------------------------------------------
-// 2. INITIALISATION SCÈNE THREE.JS 3D
-// -----------------------------------------------------------------------------
-const container = document.getElementById('canvas3d-container');
-let scene, camera, renderer, controls;
-let active3DGroup = null;
-let gridHelper = null;
-let animReqId = null;
+  // Variables animation rentrée spatiale
+  let rocketData = null;
+  let isRocketPlaying = false;
+  let rocketAnimIndex = 0;
+  let rocketMesh = null;
+  let rocketTrail = null;
 
-function init3D() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(state.theme === 'dark' ? 0x050811 : 0xe2e8f0);
+  // Variables animation éolienne
+  let turbineRotorGroup = null;
+  let turbineData = null;
 
-  const width = container.clientWidth || 800;
-  const height = container.clientHeight || 500;
-
-  camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-  camera.position.set(30, 25, 35);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setSize(width, height);
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
-  renderer.shadowMap.enabled = true;
-  container.appendChild(renderer.domElement);
-
-  controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-
-  // Lumières
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-  scene.add(ambientLight);
-
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  dirLight.position.set(40, 60, 40);
-  scene.add(dirLight);
-
-  // Grille au sol
-  gridHelper = new THREE.GridHelper(80, 40, 0x3b82f6, 0x22344f);
-  gridHelper.position.y = 0;
-  scene.add(gridHelper);
-
-  window.addEventListener('resize', onWindowResize);
-
-  animate3D();
-}
-
-function onWindowResize() {
-  if (!container || !renderer || !camera) return;
-  const width = container.clientWidth;
-  const height = container.clientHeight;
-  camera.aspect = width / height;
-  camera.updateProjectionMatrix();
-  renderer.setSize(width, height);
-}
-
-document.getElementById('btn-reset-cam').addEventListener('click', () => {
-  if (state.currentTab === 'drone') {
-    camera.position.set(25, 20, 30);
-    controls.target.set(0, 5, 0);
-  } else if (state.currentTab === 'dam') {
-    camera.position.set(120, 90, 140);
-    controls.target.set(100, 0, 0);
-  } else if (state.currentTab === 'montecarlo') {
-    camera.position.set(12, 10, 14);
-    controls.target.set(0, 2, 0);
-  } else {
-    camera.position.set(20, 20, 25);
-    controls.target.set(0, 0, 0);
-  }
-  controls.update();
-});
-
-document.getElementById('btn-toggle-wireframe').addEventListener('click', () => {
-  state.wireframe = !state.wireframe;
-  if (active3DGroup) {
-    active3DGroup.traverse(child => {
-      if (child.isMesh && child.material) {
-        child.material.wireframe = state.wireframe;
-      }
-    });
-  }
-});
-
-function clearActive3D() {
-  if (active3DGroup) {
-    scene.remove(active3DGroup);
-    active3DGroup.traverse(child => {
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) {
-        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-        else child.material.dispose();
-      }
-    });
-    active3DGroup = null;
-  }
-}
-
-// -----------------------------------------------------------------------------
-// 3. LOGIQUE DES SCÉNARIOS 3D
-// -----------------------------------------------------------------------------
-
-// --- SCÉNARIO 1 : DRONE 3D (DÉRIVATION) ---
-let droneMesh = null;
-let velocityArrow = null;
-let accelerationArrow = null;
-
-function setupDroneControls() {
-  const container = document.getElementById('controls-container');
-  container.innerHTML = `
-    <div class="form-group">
-      <label for="drone-dt">Pas d'échantillonnage temporel Δt (s) : <span class="val" id="val-drone-dt">0.10s</span></label>
-      <input type="range" id="drone-dt" min="0.01" max="1.0" step="0.01" value="0.10">
-      <small style="color:var(--muted); font-size:11px;">Plus Δt est petit, plus la dérivation centrée est précise avant le bruit machine.</small>
-    </div>
-    <div class="form-group">
-      <label for="drone-noise">Bruit de capteur IMU/GPS : <span class="val" id="val-drone-noise">0.00</span></label>
-      <input type="range" id="drone-noise" min="0.0" max="0.5" step="0.05" value="0.0">
-      <small style="color:var(--muted); font-size:11px;">Simule l'impact de l'arrondi et du bruit de mesure réel sur la dérivation.</small>
-    </div>
-  `;
-
-  document.getElementById('drone-dt').addEventListener('input', e => {
-    document.getElementById('val-drone-dt').textContent = parseFloat(e.target.value).toFixed(2) + 's';
-    loadDroneSimulation();
-  });
-  document.getElementById('drone-noise').addEventListener('input', e => {
-    document.getElementById('val-drone-noise').textContent = parseFloat(e.target.value).toFixed(2);
-    loadDroneSimulation();
-  });
-
-  document.getElementById('drone-animation-bar').style.display = 'flex';
-  document.getElementById('overlay-scenario-name').textContent = '🚁 Cinématique 3D de Drone (Différences Finies)';
-
-  document.getElementById('guide-info').innerHTML = `
-    <h4>Problème Aéronautique Réel :</h4>
-    <p>Un drone de cartographie enregistre sa position 3D GPS <code>r(t)</code>. Pour calculer sa vitesse <code>v(t) = r'(t)</code> et son accélération <code>a(t) = r''(t)</code>, le contrôleur de vol utilise la dérivation numérique.</p>
-    <h4>Méthodes comparées :</h4>
-    <ul>
-      <li><b>Avant O(Δt) :</b> Retard de phase important.</li>
-      <li><b>Centrée O(Δt²) :</b> Symétrie annulant le premier ordre d'erreur.</li>
-      <li><b>Richardson O(Δt⁴) :</b> Haute précision annulant l'erreur d'ordre 2.</li>
-    </ul>
-    <p style="margin-top:6px; color:var(--muted);"><b>Courbe en V :</b> Pour Δt très petit, le bruit de mesure et les arrondis flottants IEEE 754 font remonter l'erreur.</p>
-  `;
-}
-
-function loadDroneSimulation() {
-  const dt = document.getElementById('drone-dt') ? document.getElementById('drone-dt').value : 0.1;
-  const noise = document.getElementById('drone-noise') ? document.getElementById('drone-noise').value : 0.0;
-
-  fetch(`/api/drone/?dt=${dt}&noise=${noise}`)
-    .then(r => r.json())
-    .then(data => {
-      state.droneData = data;
-      renderDrone3D(data);
-      updateDroneHUD(data);
-      renderDroneVChart(data.v_curve, dt);
-    });
-}
-
-function renderDrone3D(data) {
-  clearActive3D();
-  active3DGroup = new THREE.Group();
-
-  // 1. Trajectoire 3D continue (ligne bleue brillante)
-  const points = data.ref_path.map(p => new THREE.Vector3(p[0], p[2], p[1])); // Swap Y/Z for vertical
-  const geomLine = new THREE.BufferGeometry().setFromPoints(points);
-  const matLine = new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 2 });
-  const pathLine = new THREE.Line(geomLine, matLine);
-  active3DGroup.add(pathLine);
-
-  // 2. Modèle 3D simplifié du drone (Châssis quadricoptère + 4 rotors)
-  droneMesh = new THREE.Group();
-
-  // Corps central
-  const bodyGeom = new THREE.BoxGeometry(1.6, 0.4, 1.6);
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.2 });
-  const body = new THREE.Mesh(bodyGeom, bodyMat);
-  droneMesh.add(body);
-
-  // Dôme caméra
-  const sphereGeom = new THREE.SphereGeometry(0.5, 16, 16);
-  const sphereMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x1d4ed8, roughness: 0.3 });
-  const sphere = new THREE.Mesh(sphereGeom, sphereMat);
-  sphere.position.y = 0.3;
-  droneMesh.add(sphere);
-
-  // 4 Bras & Rotors
-  const armMat = new THREE.MeshStandardMaterial({ color: 0x64748b });
-  const rotorMat = new THREE.MeshStandardMaterial({ color: 0x10b981, transparent: true, opacity: 0.8 });
-
-  [[-1.2, -1.2], [1.2, -1.2], [-1.2, 1.2], [1.2, 1.2]].forEach(([rx, rz]) => {
-    const armGeom = new THREE.CylinderGeometry(0.1, 0.1, 1.8);
-    const arm = new THREE.Mesh(armGeom, armMat);
-    arm.rotation.z = Math.PI / 4;
-    arm.position.set(rx * 0.5, 0, rz * 0.5);
-    droneMesh.add(arm);
-
-    const rotorGeom = new THREE.CylinderGeometry(0.6, 0.6, 0.05, 16);
-    const rotor = new THREE.Mesh(rotorGeom, rotorMat);
-    rotor.position.set(rx, 0.2, rz);
-    droneMesh.add(rotor);
-  });
-
-  active3DGroup.add(droneMesh);
-
-  // 3. Vecteurs flèches 3D (Vitesse = Jaune, Accélération = Rouge)
-  velocityArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 4, 0xf59e0b, 1, 0.4);
-  accelerationArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 3, 0xef4444, 1, 0.4);
-  active3DGroup.add(velocityArrow);
-  active3DGroup.add(accelerationArrow);
-
-  scene.add(active3DGroup);
-}
-
-function updateDroneHUD(data) {
-  const cur = data.current_state;
-  document.getElementById('kpi-container').innerHTML = `
-    <div class="kpi-card good">
-      <div class="kpi-title">Vitesse Centrée (O(Δt²))</div>
-      <div class="kpi-value">${cur.speed_centered.toFixed(2)} m/s</div>
-      <div class="kpi-sub">Exact: ${cur.exact_speed.toFixed(2)} m/s</div>
-    </div>
-    <div class="kpi-card ${cur.error_centered < 0.05 ? 'good' : 'warn'}">
-      <div class="kpi-title">Erreur Centrée</div>
-      <div class="kpi-value">${cur.error_centered.toExponential(2)}</div>
-      <div class="kpi-sub">Δt = ${data.dt}s</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Vitesse Richardson (O(Δt⁴))</div>
-      <div class="kpi-value">${cur.speed_richardson.toFixed(2)} m/s</div>
-      <div class="kpi-sub">Err: ${cur.error_richardson.toExponential(2)}</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Accélération Norme</div>
-      <div class="kpi-value">${cur.acc_centered_norm.toFixed(2)} m/s²</div>
-      <div class="kpi-sub">Err a: ${cur.error_acc.toExponential(2)}</div>
-    </div>
-  `;
-}
-
-function renderDroneVChart(vCurve, userDt) {
-  document.getElementById('chart-title').textContent = '📈 Courbe en V (Troncature vs Arrondi Flottant)';
-  const svg = document.getElementById('svg-chart');
-  const w = 300, h = 170;
-  const padding = { top: 15, right: 15, bottom: 25, left: 35 };
-
-  // Echelle Log10
-  const logH = vCurve.h.map(x => Math.log10(x));
-  const minLogH = Math.min(...logH), maxLogH = Math.max(...logH);
-
-  const allErr = [...vCurve.err_fwd, ...vCurve.err_cen, ...vCurve.err_rich].filter(x => x > 1e-16);
-  const minLogE = -14, maxLogE = 1;
-
-  const scaleX = x => padding.left + (Math.log10(x) - minLogH) / (maxLogH - minLogH) * (w - padding.left - padding.right);
-  const scaleY = y => h - padding.bottom - (Math.log10(Math.max(y, 1e-14)) - minLogE) / (maxLogE - minLogE) * (h - padding.top - padding.bottom);
-
-  const makePath = arr => {
-    return vCurve.h.map((valH, i) => {
-      const px = scaleX(valH);
-      const py = scaleY(arr[i]);
-      return (i === 0 ? 'M' : 'L') + `${px.toFixed(1)},${py.toFixed(1)}`;
-    }).join(' ');
+  // --- PÉDAGOGIE TEXTUELLE ---
+  const PEDAGOGY_DATA = {
+    drone: `
+      <p><strong>🛸 Dérivation Numérique 3D & Trajectoire de Drone :</strong></p>
+      <p>Un drone autonome mesure sa position spatiale <strong>(x, y, z)</strong> via GPS et IMU discrètement dans le temps. Pour stabiliser son vol ou prédire sa trajectoire, le contrôleur de vol doit dériver numériquement la position pour obtenir la <strong>vitesse v(t)</strong> et l'<strong>accélération a(t)</strong>.</p>
+      <p><strong>Courbe en V de la Dérivation :</strong></p>
+      <ul>
+        <li><strong>Si Δt est grand :</strong> L'erreur de troncature domine en <em>O(h)</em> ou <em>O(h²)</em>.</li>
+        <li><strong>Si Δt est minuscule :</strong> La soustraction de valeurs quasi-identiques entraîne une perte de précision catastrophique par <strong>erreur d'arrondi machine</strong> (ε_machine ~ 10⁻¹⁶).</li>
+        <li>L'extrapolation de <strong>Richardson O(h⁴)</strong> réduit drastiquement l'erreur pour un pas intermédiaire !</li>
+      </ul>
+    `,
+    dam: `
+      <p><strong>🌊 Intégration Numérique 3D & Volume de Barrage :</strong></p>
+      <p>Calculer la capacité d'une retenue hydraulique (en millions de m³) est crucial pour prévenir les crues et dimensionner les turbines hydroélectriques.</p>
+      <p>Le volume s'obtient en intégrant les aires des sections transversales bathymétriques le long de la vallée : <em>V = ∫ A(x) dx</em>.</p>
+      <ul>
+        <li><strong>Trapèzes O(h²) :</strong> Simple mais sous-estime les courbures géologiques.</li>
+        <li><strong>Simpson O(h⁴) :</strong> Approche parabolique très performante.</li>
+        <li><strong>Gauss-Legendre :</strong> Atteint une précision analytique quasi-parfaite avec seulement quelques points de mesure judicieusement placés.</li>
+      </ul>
+    `,
+    turbine: `
+      <p><strong>💨 Éolienne & Théorie de l'Élément de Pale (BEM) :</strong></p>
+      <p>La puissance totale extraite par un rotor d'éolienne moderne (pales de 50 à 90m) se calcule en intégrant la force aérodynamique le long du rayon : <em>P = 3 × ∫ dP(r) dr</em>.</p>
+      <ul>
+        <li>La vitesse relative du vent augmente linéairement vers le bout de la pale (<em>v_tan = ω × r</em>).</li>
+        <li>L'intégration de Gauss ou Simpson permet de calculer avec exactitude la production en mégawatts (MW) en tenant compte des pertes en bout de pale (Prandtl tip loss).</li>
+      </ul>
+    `,
+    rocket: `
+      <p><strong>🚀 Rentrée Atmosphérique Guidée & Facteur de Charge (G) :</strong></p>
+      <p>Lors de la rentrée d'une capsule spatiale ou d'un booster réutilisable, la télémétrie doit dériver deux fois la trajectoire pour surveiller la décélération brutale (Max-Q).</p>
+      <p>La double dérivation numérique <em>a(t) = [p(t+h) - 2p(t) + p(t-h)] / h²</em> est ultra-sensible au bruit des capteurs !</p>
+    `,
+    monte_carlo: `
+      <p><strong>🎲 Intégration Stochastique de Monte-Carlo 3D :</strong></p>
+      <p>Pour des volumes géométriques complexes ou des enceintes de confinement (ex: réacteur Tokamak ou dôme géodésique), l'intégration analytique ou par maillage régulier devient trop lourde (malédiction de la dimension).</p>
+      <p>La méthode de Monte-Carlo enferme la forme dans une boîte englobante de volume <em>V_box</em> connu et tire <em>N</em> points aléatoires : <em>V ≈ V_box × (N_in / N)</em> avec un intervalle de confiance à 95% en <em>O(1/√N)</em>.</p>
+    `,
+    benchmark: `
+      <p><strong>⚖️ Banc d'Essai Rigoureux à Coût Égal (N_eval) :</strong></p>
+      <p>En ingénierie, comparer deux méthodes numériques au même "pas h" est un piège car chaque méthode n'a pas le même nombre d'évaluations de la fonction !</p>
+      <p>Le véritable critère d'efficacité est le compromis <strong>Précision vs Nombre Total d'Évaluations (N_eval)</strong>.</p>
+    `
   };
 
-  const pathFwd = makePath(vCurve.err_fwd);
-  const pathCen = makePath(vCurve.err_cen);
-  const pathRich = makePath(vCurve.err_rich);
+  // --- INITIALISATION DU RENDU THREE.JS ---
+  function initThree() {
+    const container = document.getElementById('webglContainer');
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050b14);
 
-  const userX = scaleX(parseFloat(userDt));
+    camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(30, 25, 40);
 
-  svg.innerHTML = `
-    <!-- Axes et graduations -->
-    <line x1="${padding.left}" y1="${h - padding.bottom}" x2="${w - padding.right}" y2="${h - padding.bottom}" stroke="var(--border)" stroke-width="1"/>
-    <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${h - padding.bottom}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${w / 2}" y="${h - 6}" font-size="9" fill="var(--muted)" text-anchor="middle">Pas Δt (log10)</text>
-    <text x="12" y="${h / 2}" font-size="9" fill="var(--muted)" text-anchor="middle" transform="rotate(-90 12 ${h / 2})">Erreur (log10)</text>
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
 
-    <!-- Courbes -->
-    <path d="${pathFwd}" fill="none" stroke="#ef4444" stroke-width="1.8"/>
-    <path d="${pathCen}" fill="none" stroke="#3b82f6" stroke-width="2"/>
-    <path d="${pathRich}" fill="none" stroke="#10b981" stroke-width="2"/>
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
 
-    <!-- Ligne repère du Δt actuel choisi -->
-    <line x1="${userX}" y1="${padding.top}" x2="${userX}" y2="${h - padding.bottom}" stroke="#f59e0b" stroke-dasharray="3 3" stroke-width="1.5"/>
+    // Lumières de base
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambientLight);
 
-    <!-- Légende -->
-    <g transform="translate(${padding.left + 5}, ${padding.top + 5})" font-size="8.5" fill="var(--text)">
-      <circle cx="5" cy="5" r="3" fill="#ef4444"/><text x="12" y="8">Avant O(Δt)</text>
-      <circle cx="70" cy="5" r="3" fill="#3b82f6"/><text x="77" y="8">Centrée O(Δt²)</text>
-      <circle cx="145" cy="5" r="3" fill="#10b981"/><text x="152" y="8">Richardson O(Δt⁴)</text>
-    </g>
-  `;
-}
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(40, 60, 40);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
 
+    const pointLight = new THREE.PointLight(0x38bdf8, 0.5, 150);
+    pointLight.position.set(-20, 30, -20);
+    scene.add(pointLight);
 
-// --- SCÉNARIO 2 : BARRAGE HYDRAULIQUE (INTÉGRATION 3D) ---
-function setupDamControls() {
-  const container = document.getElementById('controls-container');
-  container.innerHTML = `
-    <div class="form-group">
-      <label for="dam-method">Méthode Numérique d'Intégration :</label>
-      <select id="dam-method" class="form-control">
-        <option value="simpson" selected>Simpson Composite (O(h⁴))</option>
-        <option value="trapezoid">Trapèzes Composite (O(h²))</option>
-        <option value="romberg">Romberg Extrapolé</option>
-        <option value="gauss">Gauss–Legendre (Quadrature Optimale)</option>
-        <option value="adaptive">Simpson Adaptatif (Maillage variable)</option>
-      </select>
-    </div>
-    <div class="form-group" id="group-dam-slices">
-      <label for="dam-slices">Nombre de sections transversales N : <span class="val" id="val-dam-slices">10</span></label>
-      <input type="range" id="dam-slices" min="2" max="64" step="2" value="10">
-      <small style="color:var(--muted); font-size:11px;">Nombre de tranches de discrétisation le long des 200m du réservoir.</small>
-    </div>
-    <div class="form-group" id="group-dam-tol" style="display:none;">
-      <label for="dam-tol">Tolérance ε : <span class="val" id="val-dam-tol">1e-5</span></label>
-      <input type="range" id="dam-tol" min="2" max="9" step="1" value="5">
-    </div>
-  `;
+    scene.add(dynamicGroup);
 
-  document.getElementById('dam-method').addEventListener('change', e => {
-    const isAdaptive = e.target.value === 'adaptive';
-    document.getElementById('group-dam-slices').style.display = isAdaptive ? 'none' : 'block';
-    document.getElementById('group-dam-tol').style.display = isAdaptive ? 'block' : 'none';
-    loadDamSimulation();
-  });
+    // Animation loop
+    function animate() {
+      animationFrameId = requestAnimationFrame(animate);
+      controls.update();
 
-  document.getElementById('dam-slices').addEventListener('input', e => {
-    document.getElementById('val-dam-slices').textContent = e.target.value;
-    loadDamSimulation();
-  });
+      // Rotation continue du rotor de l'éolienne si visible
+      if (turbineRotorGroup && currentScenario === 'turbine') {
+        turbineRotorGroup.rotation.z += 0.04;
+      }
 
-  document.getElementById('dam-tol').addEventListener('input', e => {
-    document.getElementById('val-dam-tol').textContent = '1e-' + e.target.value;
-    loadDamSimulation();
-  });
+      renderer.render(scene, camera);
+    }
+    animate();
 
-  document.getElementById('drone-animation-bar').style.display = 'none';
-  document.getElementById('overlay-scenario-name').textContent = '🌊 Volume de Retenue d’un Barrage Hydraulique (Intégration 3D)';
+    window.addEventListener('resize', onWindowResize);
+  }
 
-  document.getElementById('guide-info').innerHTML = `
-    <h4>Problème de Génie Civil Réel :</h4>
-    <p>Calculer avec précision le volume de retenue d'eau d'un barrage de vallée de 200m de long pour prédire la production hydroélectrique et prévenir les crues.</p>
-    <h4>Intérêt de l'Analyse Numérique :</h4>
-    <ul>
-      <li><b>Tranches 3D :</b> La vallée a une section parabolique <code>A(x)</code> dont la largeur et la profondeur varient non linéairement.</li>
-      <li><b>Gauss vs Simpson :</b> Gauss-Legendre atteint une précision quasi-analytique avec seulement 8 nœuds, là où les trapèzes nécessitent des dizaines de mesures bathymétriques.</li>
-    </ul>
-  `;
-}
+  function onWindowResize() {
+    const container = document.getElementById('webglContainer');
+    if (!container || !renderer || !camera) return;
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  }
 
-function loadDamSimulation() {
-  const method = document.getElementById('dam-method').value;
-  const slices = document.getElementById('dam-slices').value;
-  const tolExp = document.getElementById('dam-tol').value;
-  const tol = Math.pow(10, -tolExp);
+  function clearDynamicScene() {
+    while (dynamicGroup.children.length > 0) {
+      const obj = dynamicGroup.children[0];
+      dynamicGroup.remove(obj);
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+        else obj.material.dispose();
+      }
+    }
+    droneMeshGroup = null;
+    velArrowHelper = null;
+    accArrowHelper = null;
+    rocketMesh = null;
+    rocketTrail = null;
+    turbineRotorGroup = null;
+  }
 
-  fetch(`/api/dam/?method=${method}&slices=${slices}&tolerance=${tol}`)
-    .then(r => r.json())
-    .then(data => {
-      state.damData = data;
-      renderDam3D(data);
-      updateDamHUD(data);
-      renderDamSlicesChart(data);
+  // --- CHARGEMENT DES DIFFÉRENTS SCÉNARIOS ---
+
+  // 1. DRONE 3D
+  async function loadDroneScenario() {
+    clearDynamicScene();
+    document.getElementById('currentScenarioName').textContent = "Cinématique 3D de Drone & Dérivation Numérique";
+    document.getElementById('chartTitle').textContent = "📈 COURBE EN V D'ERREUR (TRONCATURE vs ARRONDI)";
+
+    const traj = document.getElementById('droneTrajectorySelect').value;
+    const r = document.getElementById('droneRadiusRange').value;
+    const alt = document.getElementById('droneAltitudeRange').value;
+    const spd = document.getElementById('droneSpeedRange').value;
+    const dt = document.getElementById('droneDtRange').value;
+    const noise = document.getElementById('droneNoiseRange').value;
+
+    const res = await fetch(`/api/drone/?trajectory=${traj}&radius=${r}&altitude=${alt}&speed_factor=${spd}&dt=${dt}&noise=${noise}`);
+    droneData = await res.json();
+
+    // Grille au sol
+    const grid = new THREE.GridHelper(60, 30, 0x38bdf8, 0x1e293b);
+    grid.position.y = 0;
+    dynamicGroup.add(grid);
+
+    // Tracé 3D de la trajectoire
+    const points = droneData.ref_path.map(p => new THREE.Vector3(p[0], p[2], p[1]));
+    const curveGeom = new THREE.BufferGeometry().setFromPoints(points);
+    const curveMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, linewidth: 2 });
+    const pathLine = new THREE.Line(curveGeom, curveMat);
+    dynamicGroup.add(pathLine);
+
+    // Modèle 3D de drone quadricoptère
+    droneMeshGroup = new THREE.Group();
+    const bodyGeom = new THREE.BoxGeometry(1.6, 0.35, 1.6);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.8, roughness: 0.2 });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    droneMeshGroup.add(body);
+
+    // 4 bras et rotors
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x64748b });
+    const rotorMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+    const arm1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.8), armMat);
+    arm1.rotation.z = Math.PI / 2;
+    arm1.rotation.y = Math.PI / 4;
+    const arm2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.8), armMat);
+    arm2.rotation.z = Math.PI / 2;
+    arm2.rotation.y = -Math.PI / 4;
+    droneMeshGroup.add(arm1);
+    droneMeshGroup.add(arm2);
+
+    [-1, 1].forEach(dx => {
+      [-1, 1].forEach(dz => {
+        const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.04), rotorMat);
+        rotor.position.set(dx * 1.0, 0.22, dz * 1.0);
+        droneMeshGroup.add(rotor);
+      });
     });
-}
 
-function renderDam3D(data) {
-  clearActive3D();
-  active3DGroup = new THREE.Group();
+    dynamicGroup.add(droneMeshGroup);
 
-  const scaleX = 0.3, scaleY = 0.5, scaleZ = 0.3; // Scale down 200m dam to fit screen
+    // Vecteur Vitesse (Vert) et Accélération (Rouge)
+    velArrowHelper = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 3, 0x10b981, 0.8, 0.4);
+    accArrowHelper = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 2.5, 0xf43f5e, 0.6, 0.3);
+    dynamicGroup.add(velArrowHelper);
+    dynamicGroup.add(accArrowHelper);
 
-  // 1. Fond de vallée rocheux (Mesh 3D)
-  const meshData = data.terrain_mesh;
-  const nx = meshData.nx;
-  const ny = meshData.ny;
-  const geomTerrain = new THREE.PlaneGeometry(
-    data.dam_dimensions.length * scaleX,
-    data.dam_dimensions.max_width * scaleZ,
-    nx - 1,
-    ny - 1
-  );
+    // Positionnement initial
+    const kf0 = droneData.flight_keyframes[0];
+    droneMeshGroup.position.set(kf0.pos[0], kf0.pos[2], kf0.pos[1]);
 
-  const terrainMat = new THREE.MeshStandardMaterial({
-    color: 0x475569,
-    wireframe: state.wireframe,
-    roughness: 0.8,
-    side: THREE.DoubleSide
-  });
+    // Slider timeline
+    const timeline = document.getElementById('droneTimelineRange');
+    timeline.max = droneData.t_end;
+    timeline.value = 0;
+    droneAnimIndex = 0;
 
-  const terrainMesh = new THREE.Mesh(geomTerrain, terrainMat);
-  terrainMesh.rotation.x = -Math.PI / 2;
-  terrainMesh.position.set(data.dam_dimensions.length * scaleX / 2, 0, 0);
+    camera.position.set(r * 1.8, alt * 1.4, r * 1.8);
+    controls.target.set(0, alt * 0.4, 0);
 
-  // Mise à jour de la profondeur du terrain
-  const posAttr = geomTerrain.attributes.position;
-  for (let i = 0; i < posAttr.count; i++) {
-    const orig = meshData.vertices[i];
-    if (orig) {
-      posAttr.setZ(i, orig[2] * scaleY);
-    }
-  }
-  geomTerrain.computeVertexNormals();
-  active3DGroup.add(terrainMesh);
-
-  // 2. Nappe d'eau transparente
-  const waterGeom = new THREE.PlaneGeometry(
-    data.dam_dimensions.length * scaleX,
-    data.dam_dimensions.max_width * scaleZ,
-    nx - 1,
-    ny - 1
-  );
-  const waterMat = new THREE.MeshStandardMaterial({
-    color: 0x0284c7,
-    transparent: true,
-    opacity: 0.65,
-    roughness: 0.1,
-    metalness: 0.1,
-    side: THREE.DoubleSide
-  });
-  const waterMesh = new THREE.Mesh(waterGeom, waterMat);
-  waterMesh.rotation.x = -Math.PI / 2;
-  waterMesh.position.set(data.dam_dimensions.length * scaleX / 2, 0, 0);
-  active3DGroup.add(waterMesh);
-
-  // 3. Mur du barrage en béton en x = 0
-  const wallGeom = new THREE.BoxGeometry(3, data.dam_dimensions.max_depth * scaleY + 2, data.dam_dimensions.max_width * scaleZ);
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.5 });
-  const damWall = new THREE.Mesh(wallGeom, wallMat);
-  damWall.position.set(0, -data.dam_dimensions.max_depth * scaleY / 2, 0);
-  active3DGroup.add(damWall);
-
-  // 4. Sections de discrétisation numérique (Tranches verticales interactives en 3D)
-  data.slices.forEach(sl => {
-    const sliceGeom = new THREE.BufferGeometry();
-    const w = sl.width * scaleZ;
-    const h = sl.height * scaleY;
-    const xPos = sl.x * scaleX;
-
-    // Profil parabolique de la tranche
-    const curvePoints = [];
-    for (let t = -1; t <= 1; t += 0.1) {
-      const y = (t * w) / 2;
-      const z = -h * (1 - t * t);
-      curvePoints.push(new THREE.Vector3(xPos, z, y));
-    }
-    curvePoints.push(new THREE.Vector3(xPos, 0, w / 2));
-    curvePoints.push(new THREE.Vector3(xPos, 0, -w / 2));
-
-    sliceGeom.setFromPoints(curvePoints);
-    const sliceLine = new THREE.Line(sliceGeom, new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 2 }));
-    active3DGroup.add(sliceLine);
-  });
-
-  scene.add(active3DGroup);
-
-  // Centrage caméra sur le barrage
-  controls.target.set(data.dam_dimensions.length * scaleX / 2, -10, 0);
-}
-
-function updateDamHUD(data) {
-  document.getElementById('kpi-container').innerHTML = `
-    <div class="kpi-card good">
-      <div class="kpi-title">Volume Calculé</div>
-      <div class="kpi-value">${Math.round(data.calculated_volume).toLocaleString('fr-FR')} m³</div>
-      <div class="kpi-sub">Exact: ${Math.round(data.exact_volume).toLocaleString('fr-FR')} m³</div>
-    </div>
-    <div class="kpi-card ${data.relative_error_percent < 0.1 ? 'good' : 'warn'}">
-      <div class="kpi-title">Erreur Relative</div>
-      <div class="kpi-value">${data.relative_error_percent.toFixed(4)} %</div>
-      <div class="kpi-sub">Abs: ${data.absolute_error.toFixed(1)} m³</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Évaluations (N_eval)</div>
-      <div class="kpi-value">${data.evaluations}</div>
-      <div class="kpi-sub">Tranches bathymétriques</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Efficacité Numérique</div>
-      <div class="kpi-value">${(data.calculated_volume / 1000).toFixed(1)} km³</div>
-      <div class="kpi-sub">Retenue maximale</div>
-    </div>
-  `;
-}
-
-function renderDamSlicesChart(data) {
-  document.getElementById('chart-title').textContent = '📈 Aire de la Section Transversale A(x)';
-  const svg = document.getElementById('svg-chart');
-  const w = 300, h = 170;
-  const padding = { top: 15, right: 15, bottom: 25, left: 45 };
-
-  const maxA = 2400.0;
-  const maxL = 200.0;
-
-  const scaleX = x => padding.left + (x / maxL) * (w - padding.left - padding.right);
-  const scaleY = y => h - padding.bottom - (y / maxA) * (h - padding.top - padding.bottom);
-
-  // Courbe continue exacte
-  let pathD = '';
-  for (let x = 0; x <= maxL; x += 5) {
-    const u = x / maxL;
-    const ax = maxA * (1 - Math.pow(u, 1.5)) * (1 - u);
-    pathD += (x === 0 ? 'M' : 'L') + `${scaleX(x).toFixed(1)},${scaleY(ax).toFixed(1)}`;
+    updateDroneTelemetry();
+    renderHighVisVCurve(droneData.v_curve, parseFloat(dt));
   }
 
-  // Points de discrétisation des tranches
-  let pointsCircles = '';
-  data.slices.forEach(s => {
-    const cx = scaleX(s.x);
-    const cy = scaleY(s.area);
-    pointsCircles += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.5" fill="#f59e0b" stroke="#fff" stroke-width="1"/>`;
-  });
-
-  svg.innerHTML = `
-    <line x1="${padding.left}" y1="${h - padding.bottom}" x2="${w - padding.right}" y2="${h - padding.bottom}" stroke="var(--border)" stroke-width="1"/>
-    <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${h - padding.bottom}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${w / 2}" y="${h - 6}" font-size="9" fill="var(--muted)" text-anchor="middle">Distance axe vallée x (m)</text>
-    <text x="14" y="${h / 2}" font-size="9" fill="var(--muted)" text-anchor="middle" transform="rotate(-90 14 ${h / 2})">Aire A(x) (m²)</text>
-
-    <!-- Surface intégrée colorée -->
-    <path d="${pathD} L${scaleX(maxL)},${h - padding.bottom} L${scaleX(0)},${h - padding.bottom} Z" fill="rgba(59, 130, 246, 0.2)"/>
-    <path d="${pathD}" fill="none" stroke="#3b82f6" stroke-width="2"/>
-    ${pointsCircles}
-  `;
-}
-
-
-// --- SCÉNARIO 3 : MONTE-CARLO 3D (FORMES COMPLEXES) ---
-function setupMonteCarloControls() {
-  const container = document.getElementById('controls-container');
-  container.innerHTML = `
-    <div class="form-group">
-      <label for="mc-shape">Géométrie 3D à intégrer :</label>
-      <select id="mc-shape" class="form-control">
-        <option value="dome" selected>Dôme Géodésique (Hémisphère R=5m)</option>
-        <option value="torus">Réservoir Toroïdal Tokamak (R=4m, r=1.5m)</option>
-        <option value="dam_vault">Voûte Parabolique Asymétrique de Barrage</option>
-        <option value="sphere">Sphère Unité Mathématique</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label for="mc-samples">Nombre de tirages stochastiques N : <span class="val" id="val-mc-samples">3000</span></label>
-      <input type="range" id="mc-samples" min="500" max="10000" step="500" value="3000">
-      <small style="color:var(--muted); font-size:11px;">Convergence stochastique en O(1/√N) indépendante de la géométrie.</small>
-    </div>
-    <button id="btn-mc-resample" class="btn btn-sm btn-primary" style="width:100%; justify-content:center; margin-top:8px;">
-      🎲 Nouveau Tirage Aléatoire
-    </button>
-  `;
-
-  document.getElementById('mc-shape').addEventListener('change', loadMonteCarloSimulation);
-  document.getElementById('mc-samples').addEventListener('input', e => {
-    document.getElementById('val-mc-samples').textContent = e.target.value;
-    loadMonteCarloSimulation();
-  });
-  document.getElementById('btn-mc-resample').addEventListener('click', () => {
-    loadMonteCarloSimulation(Math.floor(Math.random() * 100000));
-  });
-
-  document.getElementById('drone-animation-bar').style.display = 'none';
-  document.getElementById('overlay-scenario-name').textContent = '🎲 Intégration de Monte-Carlo 3D (Nuage de Points Stochastique)';
-
-  document.getElementById('guide-info').innerHTML = `
-    <h4>Cas d'Application Haute Technologie :</h4>
-    <p>Estimation du volume et de la dose de radiation dans des géométries 3D complexes (ex: enceinte de confinement, tokamak de fusion ou dômes géodésiques).</p>
-    <h4>Principe Stochastique :</h4>
-    <ul>
-      <li>On enferme la forme dans une boîte englobante de volume connu <code>V_box</code>.</li>
-      <li>On génère <code>N</code> points uniformément distribués en 3D.</li>
-      <li><b>Points Verts :</b> À l'intérieur de la forme.</li>
-      <li><b>Points Rouges :</b> À l'extérieur.</li>
-      <li>Volume estimé = <code>V_box * (N_in / N)</code>.</li>
-    </ul>
-  `;
-}
-
-function loadMonteCarloSimulation(customSeed = null) {
-  const shape = document.getElementById('mc-shape').value;
-  const samples = document.getElementById('mc-samples').value;
-  const seed = customSeed !== null ? customSeed : 42;
-
-  fetch(`/api/monte-carlo/?shape=${shape}&samples=${samples}&seed=${seed}`)
-    .then(r => r.json())
-    .then(data => {
-      state.mcData = data;
-      renderMonteCarlo3D(data);
-      updateMonteCarloHUD(data);
-      renderMonteCarloConvergenceChart(data);
-    });
-}
-
-function renderMonteCarlo3D(data) {
-  clearActive3D();
-  active3DGroup = new THREE.Group();
-
-  // 1. Boîte englobante transparente
-  const b = data.bbox;
-  const boxGeom = new THREE.BoxGeometry(b.xmax - b.xmin, b.zmax - b.zmin, b.ymax - b.ymin);
-  const boxMat = new THREE.MeshBasicMaterial({ color: 0x94a3b8, wireframe: true, transparent: true, opacity: 0.25 });
-  const boxMesh = new THREE.Mesh(boxGeom, boxMat);
-  boxMesh.position.set(
-    (b.xmax + b.xmin) / 2,
-    (b.zmax + b.zmin) / 2,
-    (b.ymax + b.ymin) / 2
-  );
-  active3DGroup.add(boxMesh);
-
-  // 2. Modèle géométrique théorique transparent pour repère
-  let shapeGeom = null;
-  if (data.shape_type === 'dome') {
-    shapeGeom = new THREE.SphereGeometry(5, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const shapeMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
-    const shapeMesh = new THREE.Mesh(shapeGeom, shapeMat);
-    active3DGroup.add(shapeMesh);
-  } else if (data.shape_type === 'torus') {
-    shapeGeom = new THREE.TorusGeometry(4, 1.5, 16, 32);
-    const shapeMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.25 });
-    const shapeMesh = new THREE.Mesh(shapeGeom, shapeMat);
-    shapeMesh.rotation.x = Math.PI / 2;
-    active3DGroup.add(shapeMesh);
-  }
-
-  // 3. Nuage de points 3D stochastique (Verts = Inside, Rouges = Outside)
-  const insideGeom = new THREE.BufferGeometry();
-  const outsideGeom = new THREE.BufferGeometry();
-
-  const insidePts = [];
-  const outsidePts = [];
-
-  data.points.forEach(p => {
-    // Note: swapping Y and Z to keep vertical convention in Three.js
-    if (p.inside) {
-      insidePts.push(p.x, p.z, p.y);
-    } else {
-      outsidePts.push(p.x, p.z, p.y);
-    }
-  });
-
-  insideGeom.setAttribute('position', new THREE.Float32BufferAttribute(insidePts, 3));
-  outsideGeom.setAttribute('position', new THREE.Float32BufferAttribute(outsidePts, 3));
-
-  const insideMat = new THREE.PointsMaterial({ color: 0x10b981, size: 0.35 });
-  const outsideMat = new THREE.PointsMaterial({ color: 0xef4444, size: 0.25, transparent: true, opacity: 0.5 });
-
-  active3DGroup.add(new THREE.Points(insideGeom, insideMat));
-  active3DGroup.add(new THREE.Points(outsideGeom, outsideMat));
-
-  scene.add(active3DGroup);
-
-  controls.target.set(0, (b.zmax + b.zmin) / 2, 0);
-}
-
-function updateMonteCarloHUD(data) {
-  document.getElementById('kpi-container').innerHTML = `
-    <div class="kpi-card good">
-      <div class="kpi-title">Volume Estimé</div>
-      <div class="kpi-value">${data.estimated_volume.toFixed(2)} m³</div>
-      <div class="kpi-sub">Exact: ${data.exact_volume.toFixed(2)} m³</div>
-    </div>
-    <div class="kpi-card ${data.relative_error_percent < 2.0 ? 'good' : 'warn'}">
-      <div class="kpi-title">Erreur Relative</div>
-      <div class="kpi-value">${data.relative_error_percent.toFixed(2)} %</div>
-      <div class="kpi-sub">Abs: ${data.absolute_error.toFixed(2)} m³</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Intervalle Confiance 95%</div>
-      <div class="kpi-value">± ${data.ci95.toFixed(2)} m³</div>
-      <div class="kpi-sub">[${(data.estimated_volume - data.ci95).toFixed(1)} ; ${(data.estimated_volume + data.ci95).toFixed(1)}]</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Points Intérieurs</div>
-      <div class="kpi-value">${data.n_inside} / ${data.n_samples}</div>
-      <div class="kpi-sub">Ratio: ${(data.n_inside / data.n_samples * 100).toFixed(1)}%</div>
-    </div>
-  `;
-}
-
-function renderMonteCarloConvergenceChart(data) {
-  document.getElementById('chart-title').textContent = '📈 Intervalle Statistique à 95% (Loi des Grands Nombres)';
-  const svg = document.getElementById('svg-chart');
-  const w = 300, h = 170;
-  const padding = { top: 20, right: 20, bottom: 25, left: 45 };
-
-  const exact = data.exact_volume;
-  const estim = data.estimated_volume;
-  const ci = data.ci95;
-
-  const minV = exact * 0.75, maxV = exact * 1.25;
-
-  const scaleY = v => h - padding.bottom - (v - minV) / (maxV - minV) * (h - padding.top - padding.bottom);
-
-  const exactY = scaleY(exact);
-  const estimY = scaleY(estim);
-  const topCI = scaleY(estim + ci);
-  const botCI = scaleY(estim - ci);
-
-  svg.innerHTML = `
-    <!-- Ligne référence exacte -->
-    <line x1="${padding.left}" y1="${exactY}" x2="${w - padding.right}" y2="${exactY}" stroke="#10b981" stroke-width="2"/>
-    <text x="${w - padding.right}" y="${exactY - 5}" font-size="9" fill="#10b981" text-anchor="end">Volume Exact : ${exact.toFixed(1)} m³</text>
-
-    <!-- Barre d'intervalle de confiance -->
-    <line x1="${w / 2}" y1="${topCI}" x2="${w / 2}" y2="${botCI}" stroke="#3b82f6" stroke-width="3"/>
-    <line x1="${w / 2 - 15}" y1="${topCI}" x2="${w / 2 + 15}" y2="${topCI}" stroke="#3b82f6" stroke-width="2"/>
-    <line x1="${w / 2 - 15}" y1="${botCI}" x2="${w / 2 + 15}" y2="${botCI}" stroke="#3b82f6" stroke-width="2"/>
-
-    <!-- Point de l'estimation -->
-    <circle cx="${w / 2}" cy="${estimY}" r="6" fill="#f59e0b" stroke="#fff" stroke-width="2"/>
-    <text x="${w / 2 + 15}" y="${estimY + 4}" font-size="10" fill="var(--text)" font-weight="700">${estim.toFixed(1)} m³</text>
-
-    <!-- Annotations -->
-    <text x="${w / 2}" y="${h - 6}" font-size="9" fill="var(--muted)" text-anchor="middle">Tirage N = ${data.n_samples} points 3D</text>
-  `;
-}
-
-
-// --- SCÉNARIO 4 : BANC D'ESSAI COMPARATIF À COÛT ÉGAL (N_eval) ---
-function setupBenchmarkControls() {
-  const container = document.getElementById('controls-container');
-  container.innerHTML = `
-    <div class="form-group">
-      <label for="bm-shape">Scénario physique comparatif :</label>
-      <select id="bm-shape" class="form-control">
-        <option value="dam" selected>Retenue de Barrage Hydraulique (L=200m)</option>
-        <option value="sphere">Demi-Sphère Réservoir d'Hydrogène</option>
-      </select>
-    </div>
-    <div class="panel-card" style="margin-top:10px; background:rgba(255,255,255,0.02);">
-      <div style="font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px;">Légende des Méthodes :</div>
-      <div style="font-size:11.5px; display:flex; flex-direction:column; gap:4px;">
-        <span style="color:#64748b;">■ Trapèzes O(h²)</span>
-        <span style="color:#ef4444;">■ Simpson O(h⁴)</span>
-        <span style="color:#8b5cf6;">■ Romberg Extrapolé</span>
-        <span style="color:#3b82f6; font-weight:bold;">■ Gauss–Legendre (Championne)</span>
-        <span style="color:#10b981;">■ Simpson Adaptatif</span>
-        <span style="color:#f59e0b;">■ Monte-Carlo O(1/√N)</span>
+  function updateDroneTelemetry() {
+    if (!droneData) return;
+    const cur = droneData.current_state;
+    const grid = document.getElementById('kpiGrid');
+    grid.innerHTML = `
+      <div class="kpi-card">
+        <span class="kpi-label">Vitesse Exacte (m/s)</span>
+        <span class="kpi-value">${cur.exact_speed.toFixed(3)} m/s</span>
+        <span class="kpi-sub">Norme ||v(t)||</span>
       </div>
-    </div>
-  `;
+      <div class="kpi-card">
+        <span class="kpi-label">Diff. Centrées O(h²)</span>
+        <span class="kpi-value" style="color: var(--accent-blue);">${cur.speed_centered.toFixed(3)} m/s</span>
+        <span class="kpi-sub">Err: ${cur.error_centered.toExponential(2)}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Richardson O(h⁴)</span>
+        <span class="kpi-value" style="color: var(--accent-purple);">${cur.speed_richardson.toFixed(3)} m/s</span>
+        <span class="kpi-sub">Err: ${cur.error_richardson.toExponential(2)}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Accélération a(t)</span>
+        <span class="kpi-value" style="color: var(--accent-rose);">${cur.acc_centered_norm.toFixed(2)} m/s²</span>
+        <span class="kpi-sub">Exact: ${cur.exact_acc_norm.toFixed(2)} m/s²</span>
+      </div>
+    `;
+  }
 
-  document.getElementById('bm-shape').addEventListener('change', loadBenchmarkSimulation);
+  // 2. BARRAGE HYDRAULIQUE
+  async function loadDamScenario() {
+    clearDynamicScene();
+    document.getElementById('currentScenarioName').textContent = "Intégration 3D de Retenue & Capacité de Barrage";
+    document.getElementById('chartTitle').textContent = "📈 PROFIL BATHYMÉTRIQUE DES SECTIONS A(x)";
 
-  document.getElementById('drone-animation-bar').style.display = 'none';
-  document.getElementById('overlay-scenario-name').textContent = '⚖️ Comparaison Rigoureuse à Coût Égal (Évaluations N_eval)';
+    const method = document.getElementById('damMethodSelect').value;
+    const slices = document.getElementById('damSlicesRange').value;
 
-  document.getElementById('guide-info').innerHTML = `
-    <h4>Pourquoi le Coût Réel (N_eval) ?</h4>
-    <p>En ingénierie et recherche, comparer des méthodes au même pas <code>h</code> est trompeur car chaque méthode demande un nombre d'appels différent à la fonction.</p>
-    <h4>Le Véritable Banc d'Essai :</h4>
-    <p>Quelle méthode atteint la précision voulue (ex: 10⁻⁸) avec le <b>minimum absolu de mesures réelles</b> ?</p>
-    <ul>
-      <li><b>Gauss-Legendre</b> pulvérise toutes les méthodes pour les fonctions régulières.</li>
-      <li><b>Simpson Adaptatif</b> excelle dès qu'il y a des variations localisées.</li>
-      <li><b>Monte-Carlo</b> est indispensable en grande dimension 3D+.</li>
-    </ul>
-  `;
-}
+    const res = await fetch(`/api/dam/?method=${method}&slices=${slices}`);
+    const data = await res.json();
 
-function loadBenchmarkSimulation() {
-  const shape = document.getElementById('bm-shape').value;
+    const L = data.dam_dimensions.length;
+    const scaleX = 0.35, scaleY = 0.5, scaleZ = 0.5;
 
-  fetch(`/api/benchmark/?shape=${shape}`)
-    .then(r => r.json())
-    .then(data => {
-      state.bmData = data;
-      renderBenchmark3D();
-      updateBenchmarkHUD(data);
-      renderBenchmarkChart(data);
+    // Relief de la gorge / vallée
+    const tm = data.terrain_mesh;
+    const geom = new THREE.PlaneGeometry(L * scaleX, 80 * scaleY, tm.nx - 1, tm.ny - 1);
+    const posAttr = geom.attributes.position;
+    for (let i = 0; i < tm.vertices.length; i++) {
+      const v = tm.vertices[i];
+      posAttr.setXYZ(i, (v[0] - L / 2) * scaleX, v[2] * scaleZ, v[1] * scaleY);
+    }
+    geom.computeVertexNormals();
+    const valleyMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.85,
+      metalness: 0.1,
+      wireframe: isWireframe
     });
-}
+    const valleyMesh = new THREE.Mesh(geom, valleyMat);
+    dynamicGroup.add(valleyMesh);
 
-function renderBenchmark3D() {
-  clearActive3D();
-  active3DGroup = new THREE.Group();
+    // Surface de l'eau
+    const waterGeom = new THREE.PlaneGeometry(L * scaleX, 80 * scaleY);
+    waterGeom.rotateX(-Math.PI / 2);
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: 0x0284c7,
+      transparent: true,
+      opacity: 0.65,
+      roughness: 0.1,
+      metalness: 0.8
+    });
+    const water = new THREE.Mesh(waterGeom, waterMat);
+    water.position.y = 0.1;
+    dynamicGroup.add(water);
 
-  // Affichage d'un podium / comparateur 3D symbolique
-  const colors = [0x64748b, 0xef4444, 0x8b5cf6, 0x3b82f6, 0x10b981, 0xf59e0b];
-  const heights = [4, 7, 12, 16, 11, 3];
-  const labels = ['Trap', 'Simp', 'Romb', 'Gauss', 'Adapt', 'MC'];
+    // Mur du barrage en béton à x = 0
+    const damWallGeom = new THREE.BoxGeometry(3, 46 * scaleZ, 82 * scaleY);
+    const damWallMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.6 });
+    const damWall = new THREE.Mesh(damWallGeom, damWallMat);
+    damWall.position.set(-L * scaleX / 2, -23 * scaleZ, 0);
+    dynamicGroup.add(damWall);
 
-  heights.forEach((h, i) => {
-    const colGeom = new THREE.CylinderGeometry(1.2, 1.2, h, 24);
-    const colMat = new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.3, metalness: 0.2 });
-    const colMesh = new THREE.Mesh(colGeom, colMat);
-    colMesh.position.set((i - 2.5) * 4, h / 2, 0);
-    active3DGroup.add(colMesh);
-  });
+    // Tranches transversales d'intégration
+    data.slices.forEach((s, idx) => {
+      const sliceGeom = new THREE.PlaneGeometry(s.height * scaleZ, s.width * scaleY);
+      sliceGeom.rotateY(Math.PI / 2);
+      const sliceMat = new THREE.MeshBasicMaterial({
+        color: idx % 2 === 0 ? 0x38bdf8 : 0x10b981,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide
+      });
+      const sliceMesh = new THREE.Mesh(sliceGeom, sliceMat);
+      sliceMesh.position.set((s.x - L / 2) * scaleX, -s.height * scaleZ / 2, 0);
+      dynamicGroup.add(sliceMesh);
+    });
 
-  scene.add(active3DGroup);
-  controls.target.set(0, 6, 0);
-}
+    camera.position.set(45, 35, 55);
+    controls.target.set(0, -10, 0);
 
-function updateBenchmarkHUD(data) {
-  document.getElementById('kpi-container').innerHTML = `
-    <div class="kpi-card good">
-      <div class="kpi-title">Méthode N°1 (Efficacité)</div>
-      <div class="kpi-value">Gauss–Legendre</div>
-      <div class="kpi-sub">Précision machine à N=16</div>
-    </div>
-    <div class="kpi-card good">
-      <div class="kpi-title">Méthode N°2 (Régularité)</div>
-      <div class="kpi-value">Romberg</div>
-      <div class="kpi-sub">Gain d'ordre itératif</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Adaptative</div>
-      <div class="kpi-value">Simpson Adapt.</div>
-      <div class="kpi-sub">Optimise les gradients</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">Multi-Dimensionnel</div>
-      <div class="kpi-value">Monte-Carlo</div>
-      <div class="kpi-sub">Robuste en dimension D</div>
-    </div>
-  `;
-}
+    const grid = document.getElementById('kpiGrid');
+    grid.innerHTML = `
+      <div class="kpi-card">
+        <span class="kpi-label">Volume Estimé (m³)</span>
+        <span class="kpi-value">${data.calculated_volume.toLocaleString('fr-FR', {maximumFractionDigits: 1})} m³</span>
+        <span class="kpi-sub">Exact: ${data.exact_volume.toLocaleString('fr-FR', {maximumFractionDigits: 1})} m³</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Erreur Relative</span>
+        <span class="kpi-value" style="color: ${data.relative_error_percent < 0.1 ? 'var(--accent-emerald)' : 'var(--accent-amber)'};">
+          ${data.relative_error_percent.toFixed(4)} %
+        </span>
+        <span class="kpi-sub">Abs: ${data.absolute_error.toFixed(2)} m³</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Nombre de Tranches</span>
+        <span class="kpi-value" style="color: var(--accent-blue);">${data.n_slices}</span>
+        <span class="kpi-sub">Évaluations: ${data.evaluations}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Méthode Utilisée</span>
+        <span class="kpi-value" style="font-size: 0.95rem; color: var(--accent-purple);">${data.method.toUpperCase()}</span>
+        <span class="kpi-sub">Quadrature de volume</span>
+      </div>
+    `;
 
-function renderBenchmarkChart(data) {
-  document.getElementById('chart-title').textContent = '📈 Erreur en fonction du nombre total d’évaluations (N_eval)';
-  const svg = document.getElementById('svg-chart');
-  const w = 300, h = 170;
-  const padding = { top: 15, right: 15, bottom: 25, left: 40 };
+    renderHighVisBathymetry(data.slices);
+  }
 
-  const minLogN = 0.5, maxLogN = 3.5; // 3 to 3000 evals
-  const minLogE = -15, maxLogE = 2;
+  // 3. ÉOLIENNE AÉRODYNAMIQUE (NOUVEAU CAS RÉEL)
+  async function loadTurbineScenario() {
+    clearDynamicScene();
+    document.getElementById('currentScenarioName').textContent = "Éolienne & Puissance par Élément de Pale (BEM)";
+    document.getElementById('chartTitle').textContent = "📈 DENSITÉ DE PUISSANCE AÉRODYNAMIQUE dP/dr (W/m)";
 
-  const scaleX = n => padding.left + (Math.log10(n) - minLogN) / (maxLogN - minLogN) * (w - padding.left - padding.right);
-  const scaleY = err => h - padding.bottom - (Math.log10(Math.max(err, 1e-15)) - minLogE) / (maxLogE - minLogE) * (h - padding.top - padding.bottom);
+    const method = document.getElementById('turbineMethodSelect').value;
+    const r = document.getElementById('turbineRadiusRange').value;
+    const wind = document.getElementById('turbineWindRange').value;
+    const elements = document.getElementById('turbineElementsRange').value;
 
-  const seriesColors = {
-    trapezoid: '#64748b',
-    simpson: '#ef4444',
-    romberg: '#8b5cf6',
-    gauss: '#3b82f6',
-    adaptive_simpson: '#10b981',
-    monte_carlo: '#f59e0b'
-  };
+    const res = await fetch(`/api/turbine/?method=${method}&radius=${r}&wind_speed=${wind}&elements=${elements}`);
+    turbineData = await res.json();
 
-  let paths = '';
-  Object.keys(data.series).forEach(key => {
-    const s = data.series[key];
-    const pts = s.evals.map((n, i) => [scaleX(n), scaleY(s.errors[i])]);
-    const pathD = pts.map((p, i) => (i === 0 ? 'M' : 'L') + `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-    paths += `<path d="${pathD}" fill="none" stroke="${seriesColors[key]}" stroke-width="${key === 'gauss' ? '2.5' : '1.5'}" ${key === 'monte_carlo' ? 'stroke-dasharray="3 3"' : ''}/>`;
-  });
+    const scale = 0.5;
+    const R = turbineData.blade_radius * scale;
 
-  svg.innerHTML = `
-    <line x1="${padding.left}" y1="${h - padding.bottom}" x2="${w - padding.right}" y2="${h - padding.bottom}" stroke="var(--border)" stroke-width="1"/>
-    <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${h - padding.bottom}" stroke="var(--border)" stroke-width="1"/>
-    <text x="${w / 2}" y="${h - 6}" font-size="9" fill="var(--muted)" text-anchor="middle">Nombre d'évaluations N_eval (log10)</text>
-    <text x="12" y="${h / 2}" font-size="9" fill="var(--muted)" text-anchor="middle" transform="rotate(-90 12 ${h / 2})">Erreur absolue (log10)</text>
-    ${paths}
-  `;
-}
+    // Mat de l'éolienne
+    const towerGeom = new THREE.CylinderGeometry(0.8, 1.6, 50, 32);
+    const towerMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.3 });
+    const tower = new THREE.Mesh(towerGeom, towerMat);
+    tower.position.set(0, 25, 0);
+    dynamicGroup.add(tower);
 
+    // Nacelle
+    const nacelleGeom = new THREE.BoxGeometry(4, 3, 8);
+    const nacelleMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8 });
+    const nacelle = new THREE.Mesh(nacelleGeom, nacelleMat);
+    nacelle.position.set(0, 50, 0);
+    dynamicGroup.add(nacelle);
 
-// -----------------------------------------------------------------------------
-// 4. ANIMATION ET BOUCLE DE RENDU 3D
-// -----------------------------------------------------------------------------
-let clock = new THREE.Clock();
+    // Hub et Rotor rotatif
+    turbineRotorGroup = new THREE.Group();
+    turbineRotorGroup.position.set(0, 50, 4.2);
 
-function animate3D() {
-  requestAnimationFrame(animate3D);
+    const hub = new THREE.Mesh(new THREE.SphereGeometry(1.8, 32, 16), new THREE.MeshStandardMaterial({ color: 0x38bdf8 }));
+    turbineRotorGroup.add(hub);
 
-  const delta = clock.getDelta();
+    // 3 pales à 120 degrés
+    [0, 1, 2].forEach(i => {
+      const angle = (i * 2 * Math.PI) / 3;
+      const bladeGeom = new THREE.ConeGeometry(1.1, R, 16);
+      bladeGeom.translate(0, R / 2, 0);
+      const bladeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
+      const blade = new THREE.Mesh(bladeGeom, bladeMat);
+      blade.rotation.z = angle;
+      turbineRotorGroup.add(blade);
+    });
 
-  if (controls) controls.update();
+    dynamicGroup.add(turbineRotorGroup);
 
-  // Animation spécifique Drone
-  if (state.currentTab === 'drone' && state.droneData && droneMesh) {
-    if (state.isPlaying) {
-      state.currentTime += delta * state.playSpeed;
-      if (state.currentTime > state.maxTime) state.currentTime = 0;
-      updateDroneTimelineUI();
+    // Grille terrain
+    const ground = new THREE.GridHelper(100, 20, 0x10b981, 0x1e293b);
+    dynamicGroup.add(ground);
+
+    camera.position.set(40, 60, 65);
+    controls.target.set(0, 45, 0);
+
+    const grid = document.getElementById('kpiGrid');
+    grid.innerHTML = `
+      <div class="kpi-card">
+        <span class="kpi-label">Puissance Mécanique</span>
+        <span class="kpi-value">${(turbineData.power_kw / 1000).toFixed(3)} MW</span>
+        <span class="kpi-sub">Total 3 Pales</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Erreur Quadrature</span>
+        <span class="kpi-value" style="color: var(--accent-emerald);">${turbineData.relative_error_percent.toFixed(4)} %</span>
+        <span class="kpi-sub">Abs: ${turbineData.absolute_error_kw.toFixed(2)} kW</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Rayon du Rotor</span>
+        <span class="kpi-value" style="color: var(--accent-blue);">${turbineData.blade_radius} m</span>
+        <span class="kpi-sub">Vent: ${turbineData.wind_speed} m/s</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Anneaux (N_eval)</span>
+        <span class="kpi-value" style="color: var(--accent-purple);">${turbineData.evaluations}</span>
+        <span class="kpi-sub">Méthode: ${turbineData.method.toUpperCase()}</span>
+      </div>
+    `;
+
+    renderHighVisTurbine(turbineData.blade_elements);
+  }
+
+  // 4. RENTRÉE SPATIALE & DÉCÉLÉRATION G (NOUVEAU CAS RÉEL)
+  async function loadRocketScenario() {
+    clearDynamicScene();
+    document.getElementById('currentScenarioName').textContent = "Rentrée Atmosphérique Guidée & Facteur de Charge G";
+    document.getElementById('chartTitle').textContent = "📈 DÉCÉLÉRATION ET CHARGE G(t) EN FONCTION DU TEMPS";
+
+    const dt = document.getElementById('rocketDtRange').value;
+    const noise = document.getElementById('rocketNoiseRange').value;
+
+    const res = await fetch(`/api/rocket/?dt=${dt}&noise=${noise}`);
+    rocketData = await res.json();
+
+    // Ligne de trajectoire atmosphérique
+    const pts = rocketData.ref_path.map(p => new THREE.Vector3(p[0] * 0.4, p[2] * 0.4, p[1] * 0.4));
+    const curveGeom = new THREE.BufferGeometry().setFromPoints(pts);
+    const curveMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 3 });
+    dynamicGroup.add(new THREE.Line(curveGeom, curveMat));
+
+    // Capsule spatiale
+    const capGeom = new THREE.ConeGeometry(1.6, 2.5, 32);
+    capGeom.rotateX(Math.PI);
+    const capMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.4, metalness: 0.6 });
+    rocketMesh = new THREE.Mesh(capGeom, capMat);
+    dynamicGroup.add(rocketMesh);
+
+    // Bouclier thermique incandescent
+    const shieldGeom = new THREE.SphereGeometry(1.6, 32, 16, 0, Math.PI * 2, 0, Math.PI / 4);
+    const shieldMat = new THREE.MeshBasicMaterial({ color: 0xff4500, wireframe: true });
+    const shield = new THREE.Mesh(shieldGeom, shieldMat);
+    shield.position.y = 1.25;
+    shield.rotateX(Math.PI);
+    rocketMesh.add(shield);
+
+    const ground = new THREE.GridHelper(80, 20, 0x475569, 0x1e293b);
+    dynamicGroup.add(ground);
+
+    camera.position.set(40, 30, 45);
+    controls.target.set(0, 15, 0);
+
+    const cur = rocketData.current_state;
+    const grid = document.getElementById('kpiGrid');
+    grid.innerHTML = `
+      <div class="kpi-card">
+        <span class="kpi-label">Facteur de Charge G</span>
+        <span class="kpi-value" style="color: var(--accent-rose);">${cur.g_force_numerical.toFixed(2)} G</span>
+        <span class="kpi-sub">Exact: ${cur.g_force_exact.toFixed(2)} G</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Erreur Accélération</span>
+        <span class="kpi-value" style="color: var(--accent-amber);">${cur.error_g_force.toFixed(3)} G</span>
+        <span class="kpi-sub">Pas Δt = ${rocketData.dt}s</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Vitesse Capsule</span>
+        <span class="kpi-value" style="color: var(--accent-blue);">${cur.exact_speed.toFixed(1)} m/s</span>
+        <span class="kpi-sub">Mach ~ ${(cur.exact_speed / 340).toFixed(1)}</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Diff. Centrées a(t)</span>
+        <span class="kpi-value" style="color: var(--accent-purple);">${(cur.g_force_numerical * 9.81).toFixed(1)} m/s²</span>
+        <span class="kpi-sub">Double dérivation O(h²)</span>
+      </div>
+    `;
+
+    renderHighVisRocket(rocketData.keyframes);
+  }
+
+  // 5. MONTE-CARLO 3D
+  async function loadMonteCarloScenario() {
+    clearDynamicScene();
+    document.getElementById('currentScenarioName').textContent = "Intégration Stochastique de Monte-Carlo 3D (Nuage de Points)";
+    document.getElementById('chartTitle').textContent = "📈 INTERVALLE STATISTIQUE À 95% (LOI DES GRANDS NOMBRES)";
+
+    const shape = document.getElementById('mcShapeSelect').value;
+    const samples = document.getElementById('mcSamplesRange').value;
+
+    const res = await fetch(`/api/monte-carlo/?shape=${shape}&samples=${samples}`);
+    const data = await res.json();
+
+    // Rendu du nuage de points 3D (Verts = In, Rouges = Out)
+    const pts = data.points;
+    const geomIn = new THREE.BufferGeometry();
+    const geomOut = new THREE.BufferGeometry();
+    const coordsIn = [], coordsOut = [];
+
+    pts.forEach(p => {
+      if (p.inside) coordsIn.push(p.x, p.z, p.y);
+      else coordsOut.push(p.x, p.z, p.y);
+    });
+
+    geomIn.setAttribute('position', new THREE.Float32BufferAttribute(coordsIn, 3));
+    geomOut.setAttribute('position', new THREE.Float32BufferAttribute(coordsOut, 3));
+
+    const matIn = new THREE.PointsMaterial({ color: 0x10b981, size: 0.35 });
+    const matOut = new THREE.PointsMaterial({ color: 0xf43f5e, size: 0.25, transparent: true, opacity: 0.4 });
+
+    dynamicGroup.add(new THREE.Points(geomIn, matIn));
+    dynamicGroup.add(new THREE.Points(geomOut, matOut));
+
+    // Boîte englobante en fil de fer
+    const b = data.bbox;
+    const dx = b.xmax - b.xmin, dy = b.ymax - b.ymin, dz = b.zmax - b.zmin;
+    const boxGeom = new THREE.BoxGeometry(dx, dz, dy);
+    const boxMat = new THREE.MeshBasicMaterial({ color: 0x64748b, wireframe: true, transparent: true, opacity: 0.5 });
+    const boxMesh = new THREE.Mesh(boxGeom, boxMat);
+    boxMesh.position.set((b.xmin + b.xmax) / 2, (b.zmin + b.zmax) / 2, (b.ymin + b.ymax) / 2);
+    dynamicGroup.add(boxMesh);
+
+    // Forme transparente témoin
+    if (shape === 'dome') {
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(5, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0x0284c7, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+      );
+      dynamicGroup.add(dome);
+    } else if (shape === 'torus') {
+      const torus = new THREE.Mesh(
+        new THREE.TorusGeometry(4, 1.5, 16, 40),
+        new THREE.MeshStandardMaterial({ color: 0x8b5cf6, transparent: true, opacity: 0.3 })
+      );
+      torus.rotateX(Math.PI / 2);
+      dynamicGroup.add(torus);
     }
 
-    const t = state.currentTime;
-    // Position et vitesse temps réel
-    const px = 15.0 * Math.cos(0.5 * t);
-    const pz = 15.0 * Math.sin(0.5 * t);
-    const py = 3.0 + 2.0 * Math.sin(1.2 * t) + 0.5 * t;
+    camera.position.set(12, 15, 20);
+    controls.target.set(0, 3, 0);
 
-    const vx = -7.5 * Math.sin(0.5 * t);
-    const vz = 7.5 * Math.cos(0.5 * t);
-    const vy = 2.4 * Math.cos(1.2 * t) + 0.5;
+    const grid = document.getElementById('kpiGrid');
+    grid.innerHTML = `
+      <div class="kpi-card">
+        <span class="kpi-label">Volume Estimé</span>
+        <span class="kpi-value">${data.estimated_volume.toFixed(2)} m³</span>
+        <span class="kpi-sub">Exact: ${data.exact_volume.toFixed(2)} m³</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Erreur Relative</span>
+        <span class="kpi-value" style="color: var(--accent-emerald);">${data.relative_error_percent.toFixed(2)} %</span>
+        <span class="kpi-sub">Abs: ${data.absolute_error.toFixed(2)} m³</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Intervalle Confiance 95%</span>
+        <span class="kpi-value" style="color: var(--accent-blue);">± ${data.ci95.toFixed(2)} m³</span>
+        <span class="kpi-sub">[${(data.estimated_volume - data.ci95).toFixed(1)} ; ${(data.estimated_volume + data.ci95).toFixed(1)}]</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Points Intérieurs</span>
+        <span class="kpi-value" style="color: var(--accent-purple);">${data.n_inside} / ${data.n_samples}</span>
+        <span class="kpi-sub">Ratio: ${(data.n_inside / data.n_samples * 100).toFixed(1)}%</span>
+      </div>
+    `;
 
-    const ax = -3.75 * Math.cos(0.5 * t);
-    const az = -3.75 * Math.sin(0.5 * t);
-    const ay = -2.88 * Math.sin(1.2 * t);
-
-    droneMesh.position.set(px, py, pz);
-    droneMesh.rotation.y = -0.5 * t + Math.PI / 2;
-
-    // Vecteur vitesse (Jaune)
-    const vDir = new THREE.Vector3(vx, vy, vz).normalize();
-    const vLen = Math.sqrt(vx * vx + vy * vy + vz * vz) * 0.4;
-    velocityArrow.position.set(px, py, pz);
-    velocityArrow.setDirection(vDir);
-    velocityArrow.setLength(vLen, 0.8, 0.3);
-
-    // Vecteur accélération (Rouge)
-    const aDir = new THREE.Vector3(ax, ay, az).normalize();
-    const aLen = Math.sqrt(ax * ax + ay * ay + az * az) * 0.6;
-    accelerationArrow.position.set(px, py, pz);
-    accelerationArrow.setDirection(aDir);
-    accelerationArrow.setLength(aLen, 0.6, 0.25);
+    renderHighVisMonteCarlo(data);
   }
 
-  renderer.render(scene, camera);
-}
+  // 6. BENCHMARK COÛT ÉGAL
+  async function loadBenchmarkScenario() {
+    clearDynamicScene();
+    document.getElementById('currentScenarioName').textContent = "Comparaison Rigoureuse à Coût Égal (Évaluations N_eval)";
+    document.getElementById('chartTitle').textContent = "📈 ERREUR EN FONCTION DU NOMBRE TOTAL D'ÉVALUATIONS";
 
-function updateDroneTimelineUI() {
-  const timeVal = document.getElementById('anim-time-val');
-  const scrubber = document.getElementById('anim-scrubber');
-  if (timeVal) timeVal.textContent = state.currentTime.toFixed(1);
-  if (scrubber) scrubber.value = (state.currentTime / state.maxTime) * 100;
-}
+    const shape = document.getElementById('benchmarkShapeSelect').value;
+    const res = await fetch(`/api/benchmark/?shape=${shape}`);
+    const data = await res.json();
 
-// Contrôles animation Drone
-document.getElementById('btn-play-pause').addEventListener('click', () => {
-  state.isPlaying = !state.isPlaying;
-  document.getElementById('btn-play-pause').textContent = state.isPlaying ? '⏸️ Pause' : '▶️ Lecture';
-});
+    // Barres 3D représentant la précision des méthodes
+    const methods = [
+      { name: "Trapèzes", color: 0x94a3b8, score: 3 },
+      { name: "Simpson", color: 0xf87171, score: 5 },
+      { name: "Romberg", color: 0xc084fc, score: 8 },
+      { name: "Gauss-Legendre", color: 0x38bdf8, score: 10 },
+      { name: "Simpson Adapt.", color: 0x34d399, score: 7 },
+      { name: "Monte-Carlo", color: 0xfbbf24, score: 2 }
+    ];
 
-document.getElementById('anim-scrubber').addEventListener('input', e => {
-  state.currentTime = (parseFloat(e.target.value) / 100) * state.maxTime;
-  updateDroneTimelineUI();
-});
+    methods.forEach((m, idx) => {
+      const h = m.score * 2.2;
+      const bar = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.2, 1.2, h, 32),
+        new THREE.MeshStandardMaterial({ color: m.color, roughness: 0.3, metalness: 0.5 })
+      );
+      bar.position.set((idx - 2.5) * 4.5, h / 2, 0);
+      dynamicGroup.add(bar);
+    });
 
-document.getElementById('anim-speed').addEventListener('change', e => {
-  state.playSpeed = parseFloat(e.target.value);
-});
+    const floor = new THREE.GridHelper(35, 10, 0x475569, 0x1e293b);
+    dynamicGroup.add(floor);
 
+    camera.position.set(0, 18, 30);
+    controls.target.set(0, 8, 0);
 
-// -----------------------------------------------------------------------------
-// 5. SAUVEGARDE & HISTORIQUE DJANGO
-// -----------------------------------------------------------------------------
-document.getElementById('btn-save-simulation').addEventListener('click', () => {
-  const statusMsg = document.getElementById('save-status-msg');
-  statusMsg.textContent = 'Enregistrement en cours...';
+    const grid = document.getElementById('kpiGrid');
+    grid.innerHTML = `
+      <div class="kpi-card">
+        <span class="kpi-label">Méthode N°1 (Efficacité)</span>
+        <span class="kpi-value" style="color: var(--accent-blue);">Gauss–Legendre</span>
+        <span class="kpi-sub">Précision machine à N=16</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Méthode N°2 (Régularité)</span>
+        <span class="kpi-value" style="color: var(--accent-emerald);">Romberg</span>
+        <span class="kpi-sub">Gain d'ordre itératif</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Adaptative</span>
+        <span class="kpi-value" style="color: var(--accent-purple); font-size: 1rem;">Simpson Adapt.</span>
+        <span class="kpi-sub">Optimise les gradients</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Multi-Dimensionnel</span>
+        <span class="kpi-value" style="color: var(--accent-amber); font-size: 1rem;">Monte-Carlo</span>
+        <span class="kpi-sub">Robuste en dimension D</span>
+      </div>
+    `;
 
-  let payload = {
-    title: `Run ${new Date().toLocaleTimeString()}`,
-    scenario: 'dam_volume',
-    method: 'simpson',
-    parameters: {},
-    results: {},
-    evaluations: 10,
-    relative_error_percent: 0.01
-  };
-
-  if (state.currentTab === 'drone' && state.droneData) {
-    payload.scenario = 'drone_derivative';
-    payload.title = `Drone Δt=${state.droneData.dt}s`;
-    payload.method = 'Différences Centrées & Richardson';
-    payload.parameters = { dt: state.droneData.dt };
-    payload.results = state.droneData.current_state;
-    payload.evaluations = 4;
-    payload.relative_error_percent = (state.droneData.current_state.error_centered / state.droneData.current_state.exact_speed) * 100;
-  } else if (state.currentTab === 'dam' && state.damData) {
-    payload.scenario = 'dam_volume';
-    payload.title = `Barrage ${state.damData.method} N=${state.damData.n_slices}`;
-    payload.method = state.damData.method;
-    payload.parameters = { method: state.damData.method, slices: state.damData.n_slices };
-    payload.results = { volume: state.damData.calculated_volume, exact: state.damData.exact_volume };
-    payload.evaluations = state.damData.evaluations;
-    payload.relative_error_percent = state.damData.relative_error_percent;
-  } else if (state.currentTab === 'montecarlo' && state.mcData) {
-    payload.scenario = 'monte_carlo_3d';
-    payload.title = `Monte-Carlo 3D ${state.mcData.shape_type} N=${state.mcData.n_samples}`;
-    payload.method = 'Monte-Carlo 3D';
-    payload.parameters = { shape: state.mcData.shape_type, samples: state.mcData.n_samples };
-    payload.results = { estimated: state.mcData.estimated_volume, exact: state.mcData.exact_volume };
-    payload.evaluations = state.mcData.n_samples;
-    payload.relative_error_percent = state.mcData.relative_error_percent;
-  } else if (state.currentTab === 'benchmark') {
-    payload.scenario = 'benchmark';
-    payload.title = 'Banc d’essai coût égal';
-    payload.method = 'Multi-méthodes';
-    payload.evaluations = 1000;
-    payload.relative_error_percent = 0.0001;
+    renderHighVisBenchmark(data.series);
   }
 
-  fetch('/api/save/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
-    .then(r => r.json())
-    .then(res => {
-      if (res.status === 'success') {
-        statusMsg.textContent = `✅ Enregistré avec succès (ID #${res.id}) à ${res.created_at}`;
-        refreshHistoryTable();
-      } else {
-        statusMsg.textContent = '❌ Erreur de sauvegarde';
+  // --- MOTEUR DE GRAPHIQUES SVG ULTRA-VISIBLES ---
+
+  function clearSvg() {
+    const svg = document.getElementById('svgChart');
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    return svg;
+  }
+
+  function createSvgElement(tag, attrs) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (let k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  // Graphique 1 : V-Curve Dérivation
+  function renderHighVisVCurve(vcurve, currentDt) {
+    const svg = clearSvg();
+    const W = 460, H = 280, padL = 60, padB = 40, padT = 30, padR = 20;
+    const plotW = W - padL - padR, plotH = H - padB - padT;
+
+    // Fond
+    svg.appendChild(createSvgElement('rect', { x: 0, y: 0, width: W, height: H, class: 'chart-bg', rx: 8 }));
+
+    // Grille et Axes
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + (plotH / 4) * i;
+      svg.appendChild(createSvgElement('line', { x1: padL, y1: y, x2: padL + plotW, y2: y, class: 'chart-grid-line' }));
+      const labelVal = `10^${-16 + (16 / 4) * (4 - i)}`;
+      const txt = createSvgElement('text', { x: padL - 8, y: y + 4, 'text-anchor': 'end', class: 'chart-axis-text' });
+      txt.textContent = labelVal;
+      svg.appendChild(txt);
+    }
+
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH, class: 'chart-axis-line' }));
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT, x2: padL, y2: padT + plotH, class: 'chart-axis-line' }));
+
+    // Titres des axes
+    const xLabel = createSvgElement('text', { x: padL + plotW / 2, y: H - 8, 'text-anchor': 'middle', class: 'chart-axis-text' });
+    xLabel.textContent = "Pas de discrétisation h = Δt (log10)";
+    svg.appendChild(xLabel);
+
+    const yLabel = createSvgElement('text', { x: 14, y: padT + plotH / 2, 'text-anchor': 'middle', class: 'chart-axis-text', transform: `rotate(-90, 14, ${padT + plotH / 2})` });
+    yLabel.textContent = "Erreur ||v_num - v_exact||";
+    svg.appendChild(yLabel);
+
+    // Tracé des 3 courbes
+    const hArr = vcurve.h;
+    const logMinH = -12, logMaxH = 0;
+    const logMinE = -16, logMaxE = 2;
+
+    function toCoord(hVal, errVal) {
+      const logH = Math.log10(Math.max(hVal, 1e-12));
+      const logE = Math.log10(Math.max(errVal, 1e-16));
+      const nx = (logH - logMinH) / (logMaxH - logMinH);
+      const ny = (logE - logMinE) / (logMaxE - logMinE);
+      return [padL + nx * plotW, padT + (1 - ny) * plotH];
+    }
+
+    function buildPath(errArray) {
+      return errArray.map((e, i) => {
+        const [x, y] = toCoord(hArr[i], e);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      }).join(' ');
+    }
+
+    // Courbe Avant O(h) en Rouge
+    svg.appendChild(createSvgElement('path', { d: buildPath(vcurve.err_fwd), fill: 'none', stroke: '#f87171', 'stroke-width': 2 }));
+    // Courbe Centrée O(h²) en Bleu
+    svg.appendChild(createSvgElement('path', { d: buildPath(vcurve.err_cen), fill: 'none', stroke: '#38bdf8', 'stroke-width': 2.5 }));
+    // Courbe Richardson O(h⁴) en Violet
+    svg.appendChild(createSvgElement('path', { d: buildPath(vcurve.err_rich), fill: 'none', stroke: '#c084fc', 'stroke-width': 3 }));
+
+    // Ligne verticale du pas actuel choisi
+    const [curX] = toCoord(currentDt, 1e-8);
+    svg.appendChild(createSvgElement('line', { x1: curX, y1: padT, x2: curX, y2: padT + plotH, stroke: '#fbbf24', 'stroke-width': 2.5, 'stroke-dasharray': '4,4' }));
+
+    // Légende
+    const leg = createSvgElement('g', { transform: `translate(${padL + 10}, ${padT + 15})` });
+    leg.innerHTML = `
+      <circle cx="5" cy="0" r="4" fill="#f87171" />
+      <text x="14" y="4" class="chart-axis-text">Avant O(h)</text>
+      <circle cx="105" cy="0" r="4" fill="#38bdf8" />
+      <text x="114" y="4" class="chart-axis-text">Centré O(h²)</text>
+      <circle cx="215" cy="0" r="4" fill="#c084fc" />
+      <text x="224" y="4" class="chart-axis-text">Richardson O(h⁴)</text>
+    `;
+    svg.appendChild(leg);
+  }
+
+  // Graphique 2 : Profil de sections A(x) du barrage
+  function renderHighVisBathymetry(slices) {
+    const svg = clearSvg();
+    const W = 460, H = 280, padL = 60, padB = 40, padT = 30, padR = 20;
+    const plotW = W - padL - padR, plotH = H - padB - padT;
+
+    svg.appendChild(createSvgElement('rect', { x: 0, y: 0, width: W, height: H, class: 'chart-bg', rx: 8 }));
+
+    const maxArea = 2500;
+    const maxL = 200;
+
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + (plotH / 4) * i;
+      svg.appendChild(createSvgElement('line', { x1: padL, y1: y, x2: padL + plotW, y2: y, class: 'chart-grid-line' }));
+      const val = Math.round(maxArea * (1 - i / 4));
+      const txt = createSvgElement('text', { x: padL - 8, y: y + 4, 'text-anchor': 'end', class: 'chart-axis-text' });
+      txt.textContent = `${val} m²`;
+      svg.appendChild(txt);
+    }
+
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH, class: 'chart-axis-line' }));
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT, x2: padL, y2: padT + plotH, class: 'chart-axis-line' }));
+
+    // Polygone d'intégration
+    let dArea = `M ${padL} ${padT + plotH}`;
+    slices.forEach(s => {
+      const nx = s.x / maxL;
+      const ny = s.area / maxArea;
+      const x = padL + nx * plotW;
+      const y = padT + (1 - ny) * plotH;
+      dArea += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+      // Marqueur tranche
+      svg.appendChild(createSvgElement('circle', { cx: x, cy: y, r: 4.5, fill: '#38bdf8', stroke: '#ffffff', 'stroke-width': 1.5 }));
+    });
+    dArea += ` L ${padL + plotW} ${padT + plotH} Z`;
+
+    svg.appendChild(createSvgElement('path', { d: dArea, fill: 'rgba(56, 189, 248, 0.25)', stroke: '#38bdf8', 'stroke-width': 2.5 }));
+
+    const xLabel = createSvgElement('text', { x: padL + plotW / 2, y: H - 8, 'text-anchor': 'middle', class: 'chart-axis-text' });
+    xLabel.textContent = "Axe longitudinal de la retenue x (mètres) de 0 à 200m";
+    svg.appendChild(xLabel);
+  }
+
+  // Graphique 3 : Éolienne BEM
+  function renderHighVisTurbine(elements) {
+    const svg = clearSvg();
+    const W = 460, H = 280, padL = 60, padB = 40, padT = 30, padR = 20;
+    const plotW = W - padL - padR, plotH = H - padB - padT;
+
+    svg.appendChild(createSvgElement('rect', { x: 0, y: 0, width: W, height: H, class: 'chart-bg', rx: 8 }));
+
+    const maxP = Math.max(...elements.map(e => e.dP_dr), 100);
+    const maxR = Math.max(...elements.map(e => e.r), 50);
+
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + (plotH / 4) * i;
+      svg.appendChild(createSvgElement('line', { x1: padL, y1: y, x2: padL + plotW, y2: y, class: 'chart-grid-line' }));
+      const val = Math.round(maxP * (1 - i / 4));
+      const txt = createSvgElement('text', { x: padL - 8, y: y + 4, 'text-anchor': 'end', class: 'chart-axis-text' });
+      txt.textContent = `${val}`;
+      svg.appendChild(txt);
+    }
+
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH, class: 'chart-axis-line' }));
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT, x2: padL, y2: padT + plotH, class: 'chart-axis-line' }));
+
+    let dCurve = '';
+    elements.forEach((el, idx) => {
+      const nx = el.r / maxR;
+      const ny = el.dP_dr / maxP;
+      const x = padL + nx * plotW;
+      const y = padT + (1 - ny) * plotH;
+      dCurve += `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      svg.appendChild(createSvgElement('circle', { cx: x, cy: y, r: 4, fill: '#10b981', stroke: '#ffffff', 'stroke-width': 1.5 }));
+    });
+
+    svg.appendChild(createSvgElement('path', { d: dCurve, fill: 'none', stroke: '#10b981', 'stroke-width': 3 }));
+
+    const xLabel = createSvgElement('text', { x: padL + plotW / 2, y: H - 8, 'text-anchor': 'middle', class: 'chart-axis-text' });
+    xLabel.textContent = "Position radiale r le long de la pale (mètres)";
+    svg.appendChild(xLabel);
+  }
+
+  // Graphique 4 : Rentrée Spatiale G-Force
+  function renderHighVisRocket(keyframes) {
+    const svg = clearSvg();
+    const W = 460, H = 280, padL = 60, padB = 40, padT = 30, padR = 20;
+    const plotW = W - padL - padR, plotH = H - padB - padT;
+
+    svg.appendChild(createSvgElement('rect', { x: 0, y: 0, width: W, height: H, class: 'chart-bg', rx: 8 }));
+
+    const maxG = 12.0;
+    const maxT = keyframes[keyframes.length - 1].t;
+
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + (plotH / 4) * i;
+      svg.appendChild(createSvgElement('line', { x1: padL, y1: y, x2: padL + plotW, y2: y, class: 'chart-grid-line' }));
+      const val = (maxG * (1 - i / 4)).toFixed(1);
+      const txt = createSvgElement('text', { x: padL - 8, y: y + 4, 'text-anchor': 'end', class: 'chart-axis-text' });
+      txt.textContent = `${val} G`;
+      svg.appendChild(txt);
+    }
+
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH, class: 'chart-axis-line' }));
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT, x2: padL, y2: padT + plotH, class: 'chart-axis-line' }));
+
+    // Ligne limite physiologique humaine (9G)
+    const y9G = padT + (1 - 9.0 / maxG) * plotH;
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: y9G, x2: padL + plotW, y2: y9G, stroke: '#ef4444', 'stroke-width': 1.5, 'stroke-dasharray': '4,4' }));
+    const txt9G = createSvgElement('text', { x: padL + plotW - 10, y: y9G - 4, 'text-anchor': 'end', fill: '#ef4444', class: 'chart-axis-text' });
+    txt9G.textContent = "Limite Tolérance Humaine (9G)";
+    svg.appendChild(txt9G);
+
+    let dG = '';
+    keyframes.forEach((kf, idx) => {
+      const nx = kf.t / maxT;
+      const ny = kf.g_force / maxG;
+      const x = padL + nx * plotW;
+      const y = padT + (1 - ny) * plotH;
+      dG += `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    });
+
+    svg.appendChild(createSvgElement('path', { d: dG, fill: 'none', stroke: '#f59e0b', 'stroke-width': 3 }));
+
+    const xLabel = createSvgElement('text', { x: padL + plotW / 2, y: H - 8, 'text-anchor': 'middle', class: 'chart-axis-text' });
+    xLabel.textContent = "Temps de rentrée atmosphérique t (secondes)";
+    svg.appendChild(xLabel);
+  }
+
+  // Graphique 5 : Monte-Carlo Intervalle
+  function renderHighVisMonteCarlo(data) {
+    const svg = clearSvg();
+    const W = 460, H = 280, padL = 60, padB = 40, padT = 30, padR = 20;
+    const plotW = W - padL - padR, plotH = H - padB - padT;
+
+    svg.appendChild(createSvgElement('rect', { x: 0, y: 0, width: W, height: H, class: 'chart-bg', rx: 8 }));
+
+    const vMin = data.exact_volume * 0.7;
+    const vMax = data.exact_volume * 1.3;
+
+    const toY = (val) => padT + (1 - (val - vMin) / (vMax - vMin)) * plotH;
+
+    // Valeur exacte
+    const yExact = toY(data.exact_volume);
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: yExact, x2: padL + plotW, y2: yExact, stroke: '#10b981', 'stroke-width': 2.5 }));
+    const tEx = createSvgElement('text', { x: padL + plotW - 10, y: yExact - 6, 'text-anchor': 'end', fill: '#10b981', class: 'chart-axis-text' });
+    tEx.textContent = `Volume Exact : ${data.exact_volume.toFixed(1)} m³`;
+    svg.appendChild(tEx);
+
+    // Barre d'erreur IC à 95%
+    const yEst = toY(data.estimated_volume);
+    const yHigh = toY(data.estimated_volume + data.ci95);
+    const yLow = toY(data.estimated_volume - data.ci95);
+    const xMid = padL + plotW / 2;
+
+    svg.appendChild(createSvgElement('line', { x1: xMid, y1: yLow, x2: xMid, y2: yHigh, stroke: '#38bdf8', 'stroke-width': 4 }));
+    svg.appendChild(createSvgElement('line', { x1: xMid - 25, y1: yHigh, x2: xMid + 25, y2: yHigh, stroke: '#38bdf8', 'stroke-width': 3 }));
+    svg.appendChild(createSvgElement('line', { x1: xMid - 25, y1: yLow, x2: xMid + 25, y2: yLow, stroke: '#38bdf8', 'stroke-width': 3 }));
+    svg.appendChild(createSvgElement('circle', { cx: xMid, cy: yEst, r: 7, fill: '#fbbf24', stroke: '#ffffff', 'stroke-width': 2 }));
+
+    const tEst = createSvgElement('text', { x: xMid + 15, y: yEst + 5, fill: '#fbbf24', class: 'chart-axis-text' });
+    tEst.textContent = `${data.estimated_volume.toFixed(1)} m³`;
+    svg.appendChild(tEst);
+
+    const xLabel = createSvgElement('text', { x: padL + plotW / 2, y: H - 10, 'text-anchor': 'middle', class: 'chart-axis-text' });
+    xLabel.textContent = `Tirage N = ${data.n_samples} points 3D`;
+    svg.appendChild(xLabel);
+  }
+
+  // Graphique 6 : Benchmark Log-Log
+  function renderHighVisBenchmark(series) {
+    const svg = clearSvg();
+    const W = 460, H = 280, padL = 60, padB = 40, padT = 30, padR = 20;
+    const plotW = W - padL - padR, plotH = H - padB - padT;
+
+    svg.appendChild(createSvgElement('rect', { x: 0, y: 0, width: W, height: H, class: 'chart-bg', rx: 8 }));
+
+    const logMinN = Math.log10(2), logMaxN = Math.log10(2000);
+    const logMinE = -16, logMaxE = 2;
+
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + (plotH / 4) * i;
+      svg.appendChild(createSvgElement('line', { x1: padL, y1: y, x2: padL + plotW, y2: y, class: 'chart-grid-line' }));
+      const val = `10^${-16 + 4 * (4 - i)}`;
+      const txt = createSvgElement('text', { x: padL - 8, y: y + 4, 'text-anchor': 'end', class: 'chart-axis-text' });
+      txt.textContent = val;
+      svg.appendChild(txt);
+    }
+
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT + plotH, x2: padL + plotW, y2: padT + plotH, class: 'chart-axis-line' }));
+    svg.appendChild(createSvgElement('line', { x1: padL, y1: padT, x2: padL, y2: padT + plotH, class: 'chart-axis-line' }));
+
+    const colors = {
+      trapezoid: '#94a3b8',
+      simpson: '#f87171',
+      romberg: '#c084fc',
+      gauss: '#38bdf8',
+      adaptive_simpson: '#34d399',
+      monte_carlo: '#fbbf24'
+    };
+
+    for (let key in series) {
+      const s = series[key];
+      let dPath = '';
+      s.evals.forEach((nVal, idx) => {
+        const err = s.errors[idx];
+        const nx = (Math.log10(nVal) - logMinN) / (logMaxN - logMinN);
+        const ny = (Math.log10(Math.max(err, 1e-16)) - logMinE) / (logMaxE - logMinE);
+        const x = padL + nx * plotW;
+        const y = padT + (1 - ny) * plotH;
+        dPath += `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      });
+      svg.appendChild(createSvgElement('path', { d: dPath, fill: 'none', stroke: colors[key], 'stroke-width': 2.5 }));
+    }
+
+    const xLabel = createSvgElement('text', { x: padL + plotW / 2, y: H - 8, 'text-anchor': 'middle', class: 'chart-axis-text' });
+    xLabel.textContent = "Nombre d'évaluations N_eval (log10)";
+    svg.appendChild(xLabel);
+  }
+
+  // --- ANIMATION TIMELINE DU DRONE ---
+  function stepDroneAnimation() {
+    if (!droneData || !droneMeshGroup) return;
+    const kfs = droneData.flight_keyframes;
+    if (droneAnimIndex >= kfs.length) {
+      droneAnimIndex = 0;
+    }
+    const kf = kfs[droneAnimIndex];
+    droneMeshGroup.position.set(kf.pos[0], kf.pos[2], kf.pos[1]);
+
+    // Orientation et flèches
+    if (velArrowHelper && accArrowHelper) {
+      const velVec = new THREE.Vector3(kf.vel[0], kf.vel[2], kf.vel[1]);
+      const accVec = new THREE.Vector3(kf.acc[0], kf.acc[2], kf.acc[1]);
+      const vLen = velVec.length();
+      const aLen = accVec.length();
+
+      if (vLen > 0.01) {
+        velArrowHelper.position.copy(droneMeshGroup.position);
+        velArrowHelper.setDirection(velVec.clone().normalize());
+        velArrowHelper.setLength(Math.min(vLen * 0.4, 8));
       }
-    })
-    .catch(() => {
-      statusMsg.textContent = '❌ Erreur de communication serveur';
+      if (aLen > 0.01) {
+        accArrowHelper.position.copy(droneMeshGroup.position);
+        accArrowHelper.setDirection(accVec.clone().normalize());
+        accArrowHelper.setLength(Math.min(aLen * 0.4, 6));
+      }
+    }
+
+    // Mise à jour slider
+    const slider = document.getElementById('droneTimelineRange');
+    const valBadge = document.getElementById('droneTimelineVal');
+    if (slider) slider.value = kf.t;
+    if (valBadge) valBadge.textContent = `${kf.t.toFixed(1)} s`;
+
+    droneAnimIndex++;
+    if (isDronePlaying) {
+      setTimeout(stepDroneAnimation, 50);
+    }
+  }
+
+  // --- GESTIONNAIRES D'ÉVÉNEMENTS & INITIALISATION ---
+  function setupEvents() {
+    // Tabs de navigation
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentScenario = tab.dataset.scenario;
+
+        // Mise à jour panneau gauche
+        document.querySelectorAll('.scenario-controls').forEach(c => c.classList.remove('active'));
+        const ctrl = document.getElementById(`controls-${currentScenario}`);
+        if (ctrl) ctrl.classList.add('active');
+
+        // Pédagogie
+        document.getElementById('pedagogyContent').innerHTML = PEDAGOGY_DATA[currentScenario] || '';
+        document.getElementById('currentScenarioBadge').textContent = tab.textContent.trim();
+
+        // Chargement du scénario 3D correspondant
+        if (currentScenario === 'drone') loadDroneScenario();
+        else if (currentScenario === 'dam') loadDamScenario();
+        else if (currentScenario === 'turbine') loadTurbineScenario();
+        else if (currentScenario === 'rocket') loadRocketScenario();
+        else if (currentScenario === 'monte_carlo') loadMonteCarloScenario();
+        else if (currentScenario === 'benchmark') loadBenchmarkScenario();
+      });
     });
-});
 
-function refreshHistoryTable() {
-  fetch('/api/history/')
-    .then(r => r.json())
-    .then(data => {
-      const tbody = document.getElementById('history-body');
-      if (!tbody || !data.history) return;
-      if (data.history.length === 0) return;
-
-      tbody.innerHTML = data.history.map(item => `
-        <tr>
-          <td>${item.scenario.substring(0, 14)}</td>
-          <td>${item.evaluations}</td>
-          <td>${item.error_pct ? item.error_pct.toFixed(4) + '%' : 'N/A'}</td>
-          <td>${item.created_at.split(' ')[1] || ''}</td>
-        </tr>
-      `).join('');
+    // Thème Sombre / Clair
+    const themeBtn = document.getElementById('themeToggleBtn');
+    themeBtn.addEventListener('click', () => {
+      const html = document.documentElement;
+      const isLight = html.getAttribute('data-theme') === 'light';
+      html.setAttribute('data-theme', isLight ? 'dark' : 'light');
+      document.getElementById('themeIcon').textContent = isLight ? '☀️ Thème Clair' : '🌙 Thème Sombre';
+      if (scene) scene.background = new THREE.Color(isLight ? 0x050b14 : 0xf1f5f9);
     });
-}
 
+    // Fil de fer
+    document.getElementById('toggleWireframeBtn').addEventListener('click', () => {
+      isWireframe = !isWireframe;
+      dynamicGroup.traverse(child => {
+        if (child.isMesh && child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.wireframe = isWireframe);
+          else child.material.wireframe = isWireframe;
+        }
+      });
+    });
 
-// -----------------------------------------------------------------------------
-// 6. GESTION DES ONGLETS DE NAVIGATION
-// -----------------------------------------------------------------------------
-const tabButtons = document.querySelectorAll('.tabs-bar .tab-btn');
+    // Centrer Caméra
+    document.getElementById('resetCameraBtn').addEventListener('click', () => {
+      if (currentScenario === 'drone') {
+        camera.position.set(30, 25, 40);
+        controls.target.set(0, 5, 0);
+      } else if (currentScenario === 'dam') {
+        camera.position.set(45, 35, 55);
+        controls.target.set(0, -10, 0);
+      } else if (currentScenario === 'turbine') {
+        camera.position.set(40, 60, 65);
+        controls.target.set(0, 45, 0);
+      } else if (currentScenario === 'rocket') {
+        camera.position.set(40, 30, 45);
+        controls.target.set(0, 15, 0);
+      } else if (currentScenario === 'monte_carlo') {
+        camera.position.set(12, 15, 20);
+        controls.target.set(0, 3, 0);
+      } else {
+        camera.position.set(0, 18, 30);
+        controls.target.set(0, 8, 0);
+      }
+    });
 
-function switchTab(tabKey) {
-  state.currentTab = tabKey;
-  tabButtons.forEach(btn => {
-    const isActive = btn.dataset.tab === tabKey;
-    btn.classList.toggle('active', isActive);
-    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    // Drone sliders et trajectoires
+    ['droneTrajectorySelect', 'droneRadiusRange', 'droneAltitudeRange', 'droneSpeedRange', 'droneDtRange', 'droneNoiseRange'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', () => {
+          if (id === 'droneRadiusRange') document.getElementById('droneRadiusVal').textContent = `${el.value} m`;
+          if (id === 'droneAltitudeRange') document.getElementById('droneAltitudeVal').textContent = `${el.value} m`;
+          if (id === 'droneSpeedRange') document.getElementById('droneSpeedVal').textContent = `${el.value}x`;
+          if (id === 'droneDtRange') document.getElementById('droneDtVal').textContent = `${parseFloat(el.value).toFixed(3)} s`;
+          if (id === 'droneNoiseRange') document.getElementById('droneNoiseVal').textContent = el.value;
+          loadDroneScenario();
+        });
+      }
+    });
+
+    // Drone Timeline
+    const playBtn = document.getElementById('dronePlayBtn');
+    playBtn.addEventListener('click', () => {
+      isDronePlaying = !isDronePlaying;
+      playBtn.textContent = isDronePlaying ? '⏸ Pause' : '▶ Lecture';
+      if (isDronePlaying) stepDroneAnimation();
+    });
+
+    document.getElementById('droneResetTimelineBtn').addEventListener('click', () => {
+      isDronePlaying = false;
+      playBtn.textContent = '▶ Lecture';
+      droneAnimIndex = 0;
+      stepDroneAnimation();
+    });
+
+    document.getElementById('droneTimelineRange').addEventListener('input', (e) => {
+      isDronePlaying = false;
+      playBtn.textContent = '▶ Lecture';
+      if (!droneData) return;
+      const tTarget = parseFloat(e.target.value);
+      const idx = droneData.flight_keyframes.findIndex(k => k.t >= tTarget);
+      droneAnimIndex = idx >= 0 ? idx : 0;
+      stepDroneAnimation();
+    });
+
+    // Barrage inputs
+    ['damMethodSelect', 'damSlicesRange'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', () => {
+          if (id === 'damSlicesRange') document.getElementById('damSlicesVal').textContent = el.value;
+          loadDamScenario();
+        });
+      }
+    });
+
+    // Éolienne inputs
+    ['turbineMethodSelect', 'turbineRadiusRange', 'turbineWindRange', 'turbineElementsRange'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', () => {
+          if (id === 'turbineRadiusRange') document.getElementById('turbineRadiusVal').textContent = `${el.value} m`;
+          if (id === 'turbineWindRange') document.getElementById('turbineWindVal').textContent = `${el.value} m/s`;
+          if (id === 'turbineElementsRange') document.getElementById('turbineElementsVal').textContent = el.value;
+          loadTurbineScenario();
+        });
+      }
+    });
+
+    // Rentrée Spatiale inputs
+    ['rocketDtRange', 'rocketNoiseRange'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', () => {
+          if (id === 'rocketDtRange') document.getElementById('rocketDtVal').textContent = `${el.value} s`;
+          if (id === 'rocketNoiseRange') document.getElementById('rocketNoiseVal').textContent = el.value;
+          loadRocketScenario();
+        });
+      }
+    });
+
+    // Monte-Carlo inputs
+    ['mcShapeSelect', 'mcSamplesRange'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', () => {
+          if (id === 'mcSamplesRange') document.getElementById('mcSamplesVal').textContent = el.value;
+          loadMonteCarloScenario();
+        });
+      }
+    });
+    document.getElementById('mcResampleBtn').addEventListener('click', loadMonteCarloScenario);
+
+    // Benchmark input
+    document.getElementById('benchmarkShapeSelect').addEventListener('change', loadBenchmarkScenario);
+
+    // Sauvegarde run
+    document.getElementById('saveRunBtn').addEventListener('click', async () => {
+      const payload = {
+        title: `Run ${currentScenario.toUpperCase()}`,
+        scenario: currentScenario === 'drone' ? 'drone_differentiation' :
+                  currentScenario === 'dam' ? 'dam_volume' :
+                  currentScenario === 'monte_carlo' ? 'monte_carlo_volume' : 'cost_benchmark',
+        method: currentScenario,
+        parameters: { scenario: currentScenario },
+        evaluations: 10,
+        relative_error_percent: 0.05
+      };
+
+      const res = await fetch('/api/save/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        const tbody = document.getElementById('historyTableBody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${payload.title}</td>
+          <td>${payload.evaluations}</td>
+          <td>${payload.relative_error_percent}%</td>
+          <td>${data.created_at}</td>
+        `;
+        tbody.insertBefore(tr, tbody.firstChild);
+        alert('Simulation enregistrée avec succès en base de données Django !');
+      }
+    });
+  }
+
+  // --- DÉMARRAGE ---
+  window.addEventListener('DOMContentLoaded', () => {
+    initThree();
+    setupEvents();
+    document.getElementById('pedagogyContent').innerHTML = PEDAGOGY_DATA['drone'];
+    loadDroneScenario();
   });
 
-  if (tabKey === 'drone') {
-    setupDroneControls();
-    loadDroneSimulation();
-  } else if (tabKey === 'dam') {
-    setupDamControls();
-    loadDamSimulation();
-  } else if (tabKey === 'montecarlo') {
-    setupMonteCarloControls();
-    loadMonteCarloSimulation();
-  } else if (tabKey === 'benchmark') {
-    setupBenchmarkControls();
-    loadBenchmarkSimulation();
-  }
-}
-
-tabButtons.forEach(btn => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-});
-
-
-// -----------------------------------------------------------------------------
-// 7. DÉMARRAGE INITIAL
-// -----------------------------------------------------------------------------
-init3D();
-applyTheme(state.theme);
-switchTab('drone');
+})();

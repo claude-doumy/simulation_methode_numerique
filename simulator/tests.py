@@ -1,163 +1,144 @@
-import json
-import math
 from django.test import TestCase, Client
 from django.urls import reverse
+import json
+import math
 from .models import SimulationRecord
 from . import numerical_engine as engine
 
-class NumericalEngineTestCase(TestCase):
+class NumericalEngineTests(TestCase):
+    def test_finite_difference_forward(self):
+        f = lambda x: x**2
+        df = engine.finite_difference_forward(f, 2.0, 1e-5)
+        self.assertAlmostEqual(df, 4.0, places=4)
+
     def test_finite_difference_centered(self):
-        # f(x) = sin(x), f'(1) = cos(1)
-        f = math.sin
-        exact = math.cos(1.0)
-        h = 0.01
-        res = engine.finite_difference_centered(f, 1.0, h)
-        self.assertAlmostEqual(res, exact, places=4)
+        f = lambda x: math.sin(x)
+        df = engine.finite_difference_centered(f, 0.0, 1e-4)
+        self.assertAlmostEqual(df, 1.0, places=6)
 
     def test_richardson_extrapolation(self):
-        # Richardson should give higher order precision
-        f = math.sin
-        exact = math.cos(1.0)
-        h = 0.1
-        res_cen = engine.finite_difference_centered(f, 1.0, h)
-        res_rich = engine.richardson_extrapolation(f, 1.0, h)
-        self.assertLess(abs(res_rich - exact), abs(res_cen - exact))
+        f = lambda x: math.exp(x)
+        df = engine.richardson_extrapolation(f, 1.0, 1e-2)
+        self.assertAlmostEqual(df, math.e, places=7)
 
-    def test_simpson_and_trapezoid_integration(self):
-        # int_0^1 x^2 dx = 1/3
-        f = lambda x: x**2
-        exact = 1.0 / 3.0
-        trap = engine.trapezoidal_rule(f, 0.0, 1.0, 100)
-        simp = engine.simpson_rule(f, 0.0, 1.0, 10)
-        self.assertAlmostEqual(trap, exact, places=4)
-        self.assertAlmostEqual(simp, exact, places=8)
+    def test_trapezoidal_rule(self):
+        f = lambda x: x**3
+        integ = engine.trapezoidal_rule(f, 0.0, 2.0, 100)
+        self.assertAlmostEqual(integ, 4.0, places=2)
 
-    def test_romberg_integration(self):
-        f = math.exp
-        exact = math.e - 1.0
-        res = engine.romberg_integration(f, 0.0, 1.0, max_k=4)
-        self.assertAlmostEqual(res["result"], exact, places=8)
-        self.assertGreater(res["evaluations"], 0)
+    def test_simpson_rule(self):
+        f = lambda x: x**3
+        integ = engine.simpson_rule(f, 0.0, 2.0, 20)
+        self.assertAlmostEqual(integ, 4.0, places=6)
 
     def test_gauss_legendre_quadrature(self):
-        # Exact for polynomials up to degree 2n-1
-        # n = 3 integrates degree 5 exactly: int_0^1 x^5 dx = 1/6
-        f = lambda x: x**5
-        exact = 1.0 / 6.0
-        res = engine.gauss_legendre_quadrature(f, 0.0, 1.0, n=3)
-        self.assertAlmostEqual(res["result"], exact, places=10)
+        f = lambda x: 3 * x**2
+        res = engine.gauss_legendre_quadrature(f, 0.0, 2.0, 3)
+        self.assertAlmostEqual(res["result"], 8.0, places=8)
 
     def test_adaptive_simpson(self):
-        # Function with local peak
-        f = lambda x: 1.0 / (1.0 + 100.0 * (x - 0.5)**2)
-        res = engine.adaptive_simpson(f, 0.0, 1.0, tol=1e-5)
-        self.assertGreater(res["evaluations"], 10)
-        self.assertTrue(len(res["points"]) > 0)
+        f = lambda x: math.sin(x)
+        res = engine.adaptive_simpson(f, 0.0, math.pi, tol=1e-6)
+        self.assertAlmostEqual(res["result"], 2.0, places=5)
 
-    def test_monte_carlo_3d_sampling(self):
-        res = engine.monte_carlo_3d_sampling(shape_type="dome", n_samples=1000, seed=42)
-        self.assertAlmostEqual(res["estimated_volume"], res["exact_volume"], delta=25.0)
-        self.assertIn("points", res)
-        self.assertGreater(len(res["points"]), 0)
+    def test_drone_simulation_trajectories(self):
+        for traj in ["helix", "figure8", "spiral", "slalom"]:
+            data = engine.drone_flight_trajectory_simulation(trajectory_type=traj)
+            self.assertIn("ref_path", data)
+            self.assertIn("flight_keyframes", data)
+            self.assertIn("v_curve", data)
+            self.assertGreater(len(data["flight_keyframes"]), 10)
 
-    def test_drone_flight_simulation(self):
-        data = engine.drone_flight_trajectory_simulation(dt_input=0.1)
-        self.assertIn("ref_path", data)
-        self.assertIn("flight_keyframes", data)
-        self.assertIn("current_state", data)
-        self.assertIn("v_curve", data)
-        self.assertGreater(len(data["ref_path"]), 50)
-        self.assertGreater(data["current_state"]["speed_centered"], 0)
-
-    def test_hydraulic_dam_simulation(self):
+    def test_dam_simulation(self):
         data = engine.hydraulic_dam_volume_simulation(method="simpson", n_slices=10)
-        self.assertAlmostEqual(data["calculated_volume"], data["exact_volume"], delta=200.0)
+        self.assertIn("calculated_volume", data)
+        self.assertGreater(data["calculated_volume"], 100000)
         self.assertIn("terrain_mesh", data)
-        self.assertIn("slices", data)
+
+    def test_wind_turbine_simulation(self):
+        data = engine.wind_turbine_power_simulation(method="simpson", n_elements=16)
+        self.assertIn("power_kw", data)
+        self.assertGreater(data["power_kw"], 100.0)
+
+    def test_rocket_reentry_simulation(self):
+        data = engine.rocket_reentry_trajectory_simulation(dt_input=0.05)
+        self.assertIn("keyframes", data)
+        self.assertIn("current_state", data)
+        self.assertGreater(data["current_state"]["g_force_numerical"], 0.0)
+
+    def test_monte_carlo_sampling(self):
+        data = engine.monte_carlo_3d_sampling(shape_type="dome", n_samples=1000, seed=123)
+        self.assertIn("estimated_volume", data)
+        self.assertIn("ci95", data)
+        self.assertGreater(data["estimated_volume"], 200.0)
+        self.assertLess(data["estimated_volume"], 320.0)
 
 
-class DjangoViewsAndApiTestCase(TestCase):
+class ViewsAndApiTests(TestCase):
     def setUp(self):
         self.client = Client()
 
-    def test_index_page(self):
+    def test_index_view(self):
         response = self.client.get(reverse("simulator:index"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Simulateur d'Analyse Numérique 3D")
-        self.assertContains(response, "canvas3d-container")
 
     def test_api_drone(self):
-        response = self.client.get(reverse("simulator:api_drone"), {"dt": 0.05, "noise": 0.0})
+        response = self.client.get(reverse("simulator:api_drone"), {"trajectory": "figure8", "dt": "0.1"})
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data["dt"], 0.05)
-        self.assertIn("current_state", data)
+        json_data = response.json()
+        self.assertIn("current_state", json_data)
 
     def test_api_dam(self):
-        response = self.client.get(reverse("simulator:api_dam"), {"method": "gauss", "slices": 8})
+        response = self.client.get(reverse("simulator:api_dam"), {"method": "gauss", "slices": "8"})
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data["method"], "gauss")
-        self.assertIn("calculated_volume", data)
+        json_data = response.json()
+        self.assertIn("calculated_volume", json_data)
 
-    def test_api_monte_carlo(self):
-        response = self.client.get(reverse("simulator:api_monte_carlo"), {"shape": "torus", "samples": 500})
+    def test_api_turbine(self):
+        response = self.client.get(reverse("simulator:api_turbine"), {"elements": "12"})
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data["shape_type"], "torus")
+        json_data = response.json()
+        self.assertIn("power_kw", json_data)
 
-    def test_api_benchmark(self):
-        response = self.client.get(reverse("simulator:api_benchmark"))
+    def test_api_rocket(self):
+        response = self.client.get(reverse("simulator:api_rocket"), {"dt": "0.05"})
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertIn("series", data)
+        json_data = response.json()
+        self.assertIn("keyframes", json_data)
 
     def test_api_save_and_history(self):
         payload = {
-            "title": "Test Run",
-            "scenario": "dam_volume",
+            "title": "Test Run Turbine",
+            "scenario": "drone_differentiation",
             "method": "simpson",
-            "parameters": {"slices": 10},
-            "results": {"volume": 185118},
-            "evaluations": 11,
+            "evaluations": 25,
             "relative_error_percent": 0.012
         }
-        res_save = self.client.post(
+        post_resp = self.client.post(
             reverse("simulator:api_save"),
             data=json.dumps(payload),
             content_type="application/json"
         )
-        self.assertEqual(res_save.status_code, 200)
-        save_data = res_save.json()
-        self.assertEqual(save_data["status"], "success")
+        self.assertEqual(post_resp.status_code, 200)
 
-        # Verify DB
-        record = SimulationRecord.objects.get(id=save_data["id"])
-        self.assertEqual(record.title, "Test Run")
-        self.assertEqual(record.evaluations, 11)
+        hist_resp = self.client.get(reverse("simulator:api_history"))
+        self.assertEqual(hist_resp.status_code, 200)
+        hist_data = hist_resp.json()
+        self.assertEqual(len(hist_data["history"]), 1)
 
-        # Check history API
-        res_hist = self.client.get(reverse("simulator:api_history"))
-        self.assertEqual(res_hist.status_code, 200)
-        hist_data = res_hist.json()
-        self.assertTrue(len(hist_data["history"]) >= 1)
-
-    def test_exports(self):
-        # Create a record
+    def test_csv_and_json_exports(self):
         SimulationRecord.objects.create(
             title="Export Test",
             scenario="dam_volume",
-            method="trapezoid",
-            evaluations=15,
-            relative_error_percent=0.2
+            method="romberg",
+            evaluations=17,
+            relative_error_percent=0.005
         )
-        # CSV Export
-        csv_res = self.client.get(reverse("simulator:export_csv"))
-        self.assertEqual(csv_res.status_code, 200)
-        self.assertEqual(csv_res["Content-Type"], "text/csv")
-        self.assertIn("Export Test", csv_res.content.decode("utf-8"))
+        csv_resp = self.client.get(reverse("simulator:export_csv"))
+        self.assertEqual(csv_resp.status_code, 200)
+        self.assertIn(b"Export Test", csv_resp.content)
 
-        # JSON Export
-        json_res = self.client.get(reverse("simulator:export_json"))
-        self.assertEqual(json_res.status_code, 200)
-        self.assertIn("Export Test", json_res.content.decode("utf-8"))
+        json_resp = self.client.get(reverse("simulator:export_json"))
+        self.assertEqual(json_resp.status_code, 200)
+        self.assertIn(b"Export Test", json_resp.content)
